@@ -9,11 +9,12 @@ import { AppModule } from './app.module';
 async function bootstrap() {
 
 
+
   const app = await NestFactory.create(AppModule);
   
     app.use('/payments/webhook', bodyParser.raw({ type: 'application/json' }));
 
-  
+
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,
     forbidNonWhitelisted: true,
@@ -22,6 +23,7 @@ async function bootstrap() {
   }));
 
 
+  //console.log(`Listening on ${await app.getUrl()}`);
   await app.listen(3000);
 }
 bootstrap();

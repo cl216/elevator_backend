@@ -9,6 +9,8 @@ import { SessionsModule } from './sessions/session.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { ScheduleModule } from '@nestjs/schedule';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -20,6 +22,7 @@ import { ReviewsModule } from './reviews/reviews.module';
     BookingsModule,
     PaymentsModule,
     ReviewsModule,
+    ScheduleModule.forRoot(),
     // Postgres + TypeORM setup
     TypeOrmModule.forRoot({
       type: 'postgres',

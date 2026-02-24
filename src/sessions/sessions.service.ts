@@ -72,25 +72,35 @@ export class SessionsService {
   /**
    * Get sessions for map viewport (Step 7)
    */
-  async getSessionsForMap(
-    north: number,
-    south: number,
-    east: number,
-    west: number,
-  ) {
-    return this.sessionsRepository
-      .createQueryBuilder('session')
-      .select([
-        'session.id AS session_id',
-        'ST_Y(session.location::geometry) AS lat',
-        'ST_X(session.location::geometry) AS lng',
-      ])
-      .where(
-        `session.location && ST_MakeEnvelope(:west, :south, :east, :north, 4326)`,
-        { north, south, east, west },
-      )
-      .getRawMany();
-  }
+async getSessionsForMap(north: number, south: number, east: number, west: number) {
+  return this.sessionsRepository
+    .createQueryBuilder('session')
+    .leftJoin('session.class', 'class')
+    // Join teacher_profiles ON teacher_profiles.user_id = session.teacher_id
+    .leftJoin('teacher_profiles', 'tp', 'tp.user_id = session.teacher_id')
+    .select([
+      'session.id AS session_id',
+      'ST_Y(session.location::geometry) AS lat',
+      'ST_X(session.location::geometry) AS lng',
+
+      'class.title AS title',
+      'class.category AS category',
+
+      'session.price AS price',
+      'session.start_time AS start_time',
+
+      'tp.full_name AS teacher_name',
+      'tp.image_url AS teacher_avatar_url',
+    ])
+    .where(
+      `(session.location::geometry) && ST_MakeEnvelope(:west, :south, :east, :north, 4326)`,
+      { north, south, east, west },
+      
+    )
+    //.andWhere('session.start_time > NOW()') ///////DO NOT DELETE
+    .getRawMany();
+}
+
 
   /**
    * Get full session details (tap marker)

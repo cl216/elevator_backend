@@ -19,4 +19,11 @@ export class TeacherProfile {
 
   @Column({ nullable: true })
   image_url: string;
+
+  @Column({ type: 'text', nullable: true })
+stripe_account_id: string | null;
+
+  @OneToOne(() => User, (u) => u.teacherProfile, { nullable: false })
+  @JoinColumn({ name: 'user_id' })
+  User: User;
 }

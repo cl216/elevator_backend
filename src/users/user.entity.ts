@@ -1,5 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
-
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToOne } from 'typeorm';
+import { TeacherProfile } from '../teacher/entities/teacher-profile.entity';
 export type UserRole = 'LEARNER' | 'TEACHER';
 
 @Entity('users')
@@ -18,4 +18,8 @@ export class User {
 
   @CreateDateColumn()
   created_at: Date;
+
+  @OneToOne(() => TeacherProfile, (tp) => tp.user, { nullable: true })
+teacherProfile?: TeacherProfile;
+
 }

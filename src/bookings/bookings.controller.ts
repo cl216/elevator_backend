@@ -21,8 +21,7 @@ export class BookingsController {
   // 2️⃣ TEMP test endpoint
   @Get('me')
   @Roles('LEARNER') // optional: restrict to learners
-  testCurrentUser(@CurrentUser() user: any) {
-    console.log('CURRENT USER:', user); // logs to backend terminal
-    return user; // returns JWT-extracted user to curl / Postman
+  getMyBookings(@CurrentUser() user: { id: string }) {
+    return this.bookingsService.getMyBookings(user.id);
   }
 }
