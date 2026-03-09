@@ -20,7 +20,6 @@ export class PaymentsService {
     private readonly bookingRepo: Repository<Booking>,
   ) {
     this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-      // ✅ Use a real Stripe API version (pick one and pin it)
       apiVersion: '2026-01-28.clover',
     });
   }
@@ -29,31 +28,51 @@ export class PaymentsService {
    * Webhook handler (called by controller after signature verification)
    */
   async handleWebhook(event: Stripe.Event) {
-    if (event.type !== 'checkout.session.completed') return;
+    this.logger.log(
+      `STRIPE_WEBHOOK_RECEIVED eventId=${event.id} eventType=${event.type}`,
+    );
 
-    const session = event.data.object as Stripe.Checkout.Session;
+    if (event.type !== 'checkout.session.completed') {
+      this.logger.log(
+        `STRIPE_WEBHOOK_IGNORED eventId=${event.id} eventType=${event.type}`,
+      );
+      return;
+    }
+
+    const session = event.data.object;
     const checkoutSessionId = session.id;
 
-    // ✅ Preferred: locate booking by stored checkout session id
+    this.logger.log(
+      `STRIPE_WEBHOOK_PROCESSING_CHECKOUT_COMPLETED eventId=${event.id} checkoutSessionId=${checkoutSessionId}`,
+    );
+
+    // Preferred: locate booking by stored checkout session id
     let booking = await this.bookingRepo.findOne({
       where: { stripe_checkout_session_id: checkoutSessionId },
     });
 
-    // ✅ Fallback: client_reference_id first, then metadata.bookingId
+    // Fallback: client_reference_id first, then metadata.bookingId
     if (!booking) {
       const bookingId =
         session.client_reference_id ?? session.metadata?.bookingId;
 
       if (!bookingId) {
         this.logger.warn(
-          'checkout.session.completed missing client_reference_id and metadata.bookingId',
+          `STRIPE_WEBHOOK_MISSING_BOOKING_REFERENCE eventId=${event.id} checkoutSessionId=${checkoutSessionId}`,
         );
         return;
       }
 
+      this.logger.warn(
+        `STRIPE_WEBHOOK_FALLBACK_BOOKING_LOOKUP eventId=${event.id} bookingId=${bookingId}`,
+      );
+
       booking = await this.bookingRepo.findOne({ where: { id: bookingId } });
+
       if (!booking) {
-        this.logger.warn(`No booking found for bookingId=${bookingId}`);
+        this.logger.warn(
+          `STRIPE_WEBHOOK_BOOKING_NOT_FOUND eventId=${event.id} bookingId=${bookingId}`,
+        );
         return;
       }
 
@@ -61,20 +80,33 @@ export class PaymentsService {
       booking.stripe_checkout_session_id = checkoutSessionId;
     }
 
-    // ✅ Idempotency: only confirm if still pending
-    if (booking.status !== 'PENDING') return;
+    // Idempotency: only confirm if still pending
+    if (booking.status !== 'PENDING') {
+      this.logger.log(
+        `STRIPE_WEBHOOK_ALREADY_PROCESSED eventId=${event.id} bookingId=${booking.id} status=${booking.status}`,
+      );
+      return;
+    }
 
     booking.stripe_payment_intent_id = String(session.payment_intent ?? '');
     booking.paid_at = new Date();
     booking.status = 'CONFIRMED';
 
     await this.bookingRepo.save(booking);
+
+    this.logger.log(
+      `STRIPE_WEBHOOK_BOOKING_CONFIRMED eventId=${event.id} bookingId=${booking.id} checkoutSessionId=${checkoutSessionId}`,
+    );
   }
 
   /**
    * Create Stripe Checkout Session for a booking (server-driven, idempotent)
    */
   async createCheckoutSession(bookingId: string, learnerId: string) {
+    this.logger.log(
+      `PAYMENT_CHECKOUT_CREATE_ATTEMPT bookingId=${bookingId} learnerId=${learnerId}`,
+    );
+
     const booking = await this.bookingRepo.findOne({
       where: { id: bookingId },
       relations: {
@@ -83,83 +115,102 @@ export class PaymentsService {
       } as any,
     });
 
-    if (!booking) throw new NotFoundException('Booking not found');
-    if (booking.user.id !== learnerId)
-      throw new ForbiddenException('Not your booking');
+    if (!booking) {
+      this.logger.warn(
+        `PAYMENT_CHECKOUT_BOOKING_NOT_FOUND bookingId=${bookingId} learnerId=${learnerId}`,
+      );
+      throw new NotFoundException('Booking not found');
+    }
 
-    // Must be pending to pay
+    if (booking.user.id !== learnerId) {
+      this.logger.warn(
+        `PAYMENT_CHECKOUT_FORBIDDEN bookingId=${bookingId} learnerId=${learnerId} bookingUserId=${booking.user.id}`,
+      );
+      throw new ForbiddenException('Not your booking');
+    }
+
     if (booking.status !== 'PENDING') {
+      this.logger.warn(
+        `PAYMENT_CHECKOUT_INVALID_STATUS bookingId=${bookingId} learnerId=${learnerId} status=${booking.status}`,
+      );
       throw new BadRequestException('Booking is not pending');
     }
 
-    // Expiry check
     if (booking.expires_at && booking.expires_at <= new Date()) {
+      this.logger.warn(
+        `PAYMENT_CHECKOUT_BOOKING_EXPIRED bookingId=${bookingId} learnerId=${learnerId}`,
+      );
       throw new BadRequestException('Booking expired');
     }
 
-    // Session must be in the future
     if (booking.session.start_time <= new Date()) {
-      throw new BadRequestException('Session already started or is in the past');
+      this.logger.warn(
+        `PAYMENT_CHECKOUT_SESSION_IN_PAST bookingId=${bookingId} learnerId=${learnerId} sessionId=${booking.session.id}`,
+      );
+      throw new BadRequestException(
+        'Session already started or is in the past',
+      );
     }
 
-    const amount = booking.session.price;
-    if (!Number.isFinite(amount) || amount <= 0) {
+    const priceEuros = booking.session.price;
+
+    if (!Number.isFinite(priceEuros) || priceEuros <= 0) {
       throw new BadRequestException('Invalid session price');
     }
 
-    const currency = process.env.PAYMENTS_CURRENCY ?? 'eur';
+    const amount = Math.round(priceEuros * 100);
 
-    const destinationAccountId =
-      booking.session.teacher.teacherProfile?.stripe_account_id;
-    if (!destinationAccountId) {
-      throw new BadRequestException('Teacher is not set up for payments');
-    }
+    const currency = process.env.PAYMENTS_CURRENCY ?? 'eur';
 
     const successUrl = process.env.CHECKOUT_SUCCESS_URL;
     const cancelUrl = process.env.CHECKOUT_CANCEL_URL;
+
     if (!successUrl || !cancelUrl) {
+      this.logger.error(
+        `PAYMENT_CHECKOUT_MISSING_URLS bookingId=${bookingId} learnerId=${learnerId}`,
+      );
       throw new BadRequestException(
         'Missing CHECKOUT_SUCCESS_URL or CHECKOUT_CANCEL_URL',
       );
     }
 
-    const applicationFeeAmount = Math.round(amount * 0.1);
-
-    // ✅ Idempotency: if we already created a checkout session, return it if still usable
+    // Idempotency: if we already created a checkout session, return it if still usable
     if (booking.stripe_checkout_session_id) {
       const existing = await this.stripe.checkout.sessions.retrieve(
         booking.stripe_checkout_session_id,
       );
 
-      // Stripe session statuses: 'open' | 'complete' | 'expired'
       if (existing.status === 'open' && existing.url) {
+        this.logger.log(
+          `PAYMENT_CHECKOUT_REUSED bookingId=${bookingId} learnerId=${learnerId} checkoutSessionId=${existing.id}`,
+        );
         return { checkoutUrl: existing.url, checkoutSessionId: existing.id };
       }
 
       if (existing.status === 'complete') {
-        // Payment completed. Webhook should confirm booking; treat as non-payable here.
+        this.logger.warn(
+          `PAYMENT_CHECKOUT_ALREADY_COMPLETE bookingId=${bookingId} learnerId=${learnerId} checkoutSessionId=${existing.id}`,
+        );
         throw new BadRequestException(
           'Checkout already completed for this booking',
         );
       }
 
       if (existing.status === 'expired') {
-        // Allow a new checkout by clearing stored values
+        this.logger.warn(
+          `PAYMENT_CHECKOUT_EXPIRED_RESET bookingId=${bookingId} learnerId=${learnerId} checkoutSessionId=${existing.id}`,
+        );
         booking.stripe_checkout_session_id = null;
         booking.checkout_created_at = null;
         await this.bookingRepo.save(booking);
       }
     }
 
-    // ✅ Create session with Stripe idempotency key + stable booking reference
     const session = await this.stripe.checkout.sessions.create(
       {
         mode: 'payment',
         payment_method_types: ['card'],
-
-        // Stable reference returned in webhook payload
         client_reference_id: booking.id,
-
         line_items: [
           {
             price_data: {
@@ -172,21 +223,12 @@ export class PaymentsService {
         ],
         success_url: successUrl,
         cancel_url: cancelUrl,
-
         payment_intent_data: {
-          application_fee_amount: applicationFeeAmount,
-          transfer_data: {
-            destination: destinationAccountId,
-          },
-          metadata: {
-            bookingId: booking.id,
-          },
+          metadata: { bookingId: booking.id },
         },
-
         metadata: { bookingId: booking.id },
       },
       {
-        // If the client retries, Stripe will return the same session instead of creating duplicates
         idempotencyKey: `checkout_${booking.id}`,
       },
     );
@@ -197,6 +239,10 @@ export class PaymentsService {
     booking.checkout_created_at = new Date();
 
     await this.bookingRepo.save(booking);
+
+    this.logger.log(
+      `PAYMENT_CHECKOUT_CREATE_SUCCESS bookingId=${bookingId} learnerId=${learnerId} checkoutSessionId=${session.id}`,
+    );
 
     return { checkoutUrl: session.url, checkoutSessionId: session.id };
   }

@@ -1,4 +1,10 @@
-import { IsUUID, IsNumber, IsDateString, ArrayMinSize, ArrayMaxSize } from 'class-validator';
+import {
+  IsUUID,
+  IsNumber,
+  IsDateString,
+  ArrayMinSize,
+  ArrayMaxSize,
+} from 'class-validator';
 
 export class CreateSessionDto {
   @IsUUID()

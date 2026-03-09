@@ -4,23 +4,27 @@ import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CreateBookingDto } from './dto/create-booking.dto';
+import { Throttle } from '@nestjs/throttler';
 
 @Controller('bookings')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class BookingsController {
   constructor(private readonly bookingsService: BookingsService) {}
-  // 1️⃣ Core booking endpoint
+
   @Post()
   @Roles('LEARNER')
-  create(
-    @CurrentUser() user: { id: string },
-    @Body('sessionId') sessionId: string,
-  ) {
-    return this.bookingsService.createBooking(user.id, sessionId);
+  @Throttle({ short: { limit: 5, ttl: 60_000 } })
+  create(@CurrentUser() user: { id: string }, @Body() dto: CreateBookingDto) {
+    return this.bookingsService.createBooking(
+      user.id,
+      dto.sessionId,
+      dto.introMessage,
+    );
   }
-  // 2️⃣ TEMP test endpoint
+
   @Get('me')
-  @Roles('LEARNER') // optional: restrict to learners
+  @Roles('LEARNER')
   getMyBookings(@CurrentUser() user: { id: string }) {
     return this.bookingsService.getMyBookings(user.id);
   }

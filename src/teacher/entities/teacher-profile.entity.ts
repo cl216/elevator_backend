@@ -1,29 +1,27 @@
 import { Entity, PrimaryGeneratedColumn, Column, OneToOne, JoinColumn } from 'typeorm';
 import { User } from '../../users/user.entity';
 
-
 @Entity('teacher_profiles')
 export class TeacherProfile {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @OneToOne(() => User)
+  @OneToOne(() => User, { nullable: false })
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @Column()
+  @Column({ type: 'text' })
   full_name: string;
 
-  @Column({ nullable: true })
-  bio: string;
-
-  @Column({ nullable: true })
-  image_url: string;
+  @Column({ type: 'text', nullable: true })
+  bio: string | null;
 
   @Column({ type: 'text', nullable: true })
-stripe_account_id: string | null;
+  image_url: string | null;
 
-  @OneToOne(() => User, (u) => u.teacherProfile, { nullable: false })
-  @JoinColumn({ name: 'user_id' })
-  User: User;
+  @Column({ type: 'text', nullable: true })
+  stripe_account_id: string | null;
+
+  @Column({ default: false })
+  stripe_enabled: boolean;
 }

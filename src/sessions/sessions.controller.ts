@@ -12,6 +12,8 @@ import { JwtAuthGuard } from '../auth/jwt.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { DuplicateSessionDto } from './dto/duplicate-session.dto';
+import { UpdateArrivalInstructionsDto } from './dto/update-arrival-instructions.dto';
 
 @Controller('sessions')
 export class SessionsController {
@@ -47,7 +49,40 @@ export class SessionsController {
   }
 
   /**
-   * Map query (Step 7)
+   * Duplicate session (TEACHER only)
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('TEACHER')
+  @Post(':id/duplicate')
+  duplicateSession(
+    @Param('id') id: string,
+    @Body() dto: DuplicateSessionDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.sessionsService.duplicateSession(
+      id,
+      user.id,
+      new Date(dto.start_time),
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('TEACHER')
+  @Post(':id/arrival-instructions')
+  updateArrivalInstructions(
+    @Param('id') id: string,
+    @Body() dto: UpdateArrivalInstructionsDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.sessionsService.updateArrivalInstructions(
+      id,
+      user.id,
+      dto.arrival_instructions,
+    );
+  }
+
+  /**
+   * Map query
    */
   @Get('map')
   getForMap(
@@ -55,12 +90,14 @@ export class SessionsController {
     @Query('south') south: string,
     @Query('east') east: string,
     @Query('west') west: string,
+    @Query('category') category?: string,
   ) {
     return this.sessionsService.getSessionsForMap(
       Number(north),
       Number(south),
       Number(east),
       Number(west),
+      category,
     );
   }
 

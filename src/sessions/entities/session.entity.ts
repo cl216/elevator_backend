@@ -1,4 +1,10 @@
-import { Entity, PrimaryGeneratedColumn, JoinColumn, Column, ManyToOne } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  JoinColumn,
+  Column,
+  ManyToOne,
+} from 'typeorm';
 import { Class } from '../../classes/entities/class.entity';
 import { User } from '../../users/user.entity';
 
@@ -8,7 +14,7 @@ export class Session {
   id: string;
 
   @ManyToOne(() => Class, { nullable: false })
- @JoinColumn({ name: 'class_id' }) // ✅ THIS IS THE FIX
+  @JoinColumn({ name: 'class_id' }) // ✅ THIS IS THE FIX
   class: Class;
 
   @ManyToOne(() => User, { nullable: false })
@@ -17,6 +23,9 @@ export class Session {
 
   @Column({ type: 'timestamp' })
   start_time: Date;
+
+  @Column({ type: 'timestamp' })
+  end_time: Date;
 
   @Column({ type: 'int' })
   duration: number;
@@ -32,5 +41,8 @@ export class Session {
     spatialFeatureType: 'Point',
     srid: 4326,
   })
-    location: object;
+  location: object;
+
+  @Column({ type: 'text', nullable: true })
+  arrival_instructions: string | null;
 }

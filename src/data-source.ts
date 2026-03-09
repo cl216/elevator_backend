@@ -7,6 +7,7 @@ import { Class } from './classes/entities/class.entity';
 import { Session } from './sessions/entities/session.entity';
 import { Booking } from './bookings/entities/booking.entity';
 import { TeacherProfile } from './teacher/entities/teacher-profile.entity';
+import { TeacherFollower } from './teacher/entities/teacher-follower.entity';
 
 const dataSource = new DataSource({
   type: 'postgres',
@@ -16,7 +17,7 @@ const dataSource = new DataSource({
   password: process.env.DB_PASS ?? 'classes_pass',
   database: process.env.DB_NAME ?? 'classes',
 
-  entities: [User, Class, Session, Booking, TeacherProfile],
+  entities: [User, Class, Session, Booking, TeacherProfile, TeacherFollower],
   migrations: ['src/migrations/*.ts'],
 
   synchronize: false,
