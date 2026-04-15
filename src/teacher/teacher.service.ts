@@ -3,7 +3,6 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
-  ConflictException
 } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -14,6 +13,7 @@ import { User } from '../users/user.entity';
 import { containsBlockedContactOrOffPlatformContent } from '../utils/content-moderation';
 import { Booking } from '../bookings/entities/booking.entity';
 import { Session } from '../sessions/entities/session.entity';
+import { ReviewsService } from '../reviews/reviews.service';
 
 @Injectable()
 export class TeacherService {
@@ -32,44 +32,53 @@ export class TeacherService {
 
     @InjectRepository(Session)
     private sessionRepo: Repository<Session>,
-  ) { }
+
+    private readonly reviewsService: ReviewsService,
+  ) {}
 
   async createProfile(user: User, dto: CreateTeacherProfileDto) {
-  if (dto.bio && containsBlockedContactOrOffPlatformContent(dto.bio)) {
-    throw new BadRequestException(
-      'Please keep communication on the platform. Do not include phone numbers, email addresses, social handles, or external sites in your bio.',
-    );
+    if (dto.bio && containsBlockedContactOrOffPlatformContent(dto.bio)) {
+      throw new BadRequestException(
+        'Please keep communication on the platform. Do not include phone numbers, email addresses, social handles, or external sites in your bio.',
+      );
+    }
+
+    const existingProfile = await this.profileRepo.findOne({
+      where: {
+        user: { id: user.id },
+      } as any,
+      relations: ['user'],
+    });
+
+    const full_name = dto.full_name.trim();
+    const bio = dto.bio?.trim() || null;
+    const image_url = dto.image_url?.trim() || null;
+
+    if (existingProfile) {
+      existingProfile.full_name = full_name;
+      existingProfile.bio = bio;
+      existingProfile.image_url = image_url;
+
+      const savedProfile = await this.profileRepo.save(existingProfile);
+
+      await this.userRepo.update({ id: user.id }, { role: 'TEACHER' });
+
+      return savedProfile;
+    }
+
+    const profile = this.profileRepo.create({
+      full_name,
+      bio,
+      image_url,
+      user: { id: user.id } as User,
+    });
+
+    const savedProfile = await this.profileRepo.save(profile);
+
+    await this.userRepo.update({ id: user.id }, { role: 'TEACHER' });
+
+    return savedProfile;
   }
-
-  const existingProfile = await this.profileRepo.findOne({
-    where: {
-      user: { id: user.id },
-    } as any,
-    relations: ['user'],
-  });
-
-  const full_name = dto.full_name.trim();
-  const bio = dto.bio?.trim() || null;
-  const image_url = dto.image_url?.trim() || null;
-
-  if (existingProfile) {
-    existingProfile.full_name = full_name;
-    existingProfile.bio = bio;
-    existingProfile.image_url = image_url;
-
-    return this.profileRepo.save(existingProfile);
-  }
-
-  const profile = this.profileRepo.create({
-    full_name,
-    bio,
-    image_url,
-    user: { id: user.id } as User,
-  });
-
-  return this.profileRepo.save(profile);
-}
-
 
   async followTeacher(currentUserId: string, teacherId: string) {
     if (currentUserId === teacherId) {
@@ -78,9 +87,10 @@ export class TeacherService {
 
     const teacher = await this.userRepo.findOne({
       where: { id: teacherId },
+      relations: { teacherProfile: true } as any,
     });
 
-    if (!teacher || teacher.role !== 'TEACHER') {
+    if (!teacher?.teacherProfile) {
       throw new NotFoundException('Teacher not found');
     }
 
@@ -149,6 +159,15 @@ export class TeacherService {
   }
 
   async getSessionBookingsForTeacher(sessionId: string, teacherId: string) {
+    const teacher = await this.userRepo.findOne({
+      where: { id: teacherId },
+      relations: { teacherProfile: true } as any,
+    });
+
+    if (!teacher?.teacherProfile) {
+      throw new ForbiddenException('Teacher profile required');
+    }
+
     const session = await this.sessionRepo.findOne({
       where: { id: sessionId },
       relations: ['teacher'],
@@ -211,13 +230,16 @@ export class TeacherService {
 
   async getPublicTeacherProfile(teacherId: string) {
     const teacher = await this.userRepo.findOne({
-      where: { id: teacherId, role: 'TEACHER' as any },
+      where: { id: teacherId },
       relations: { teacherProfile: true } as any,
     });
 
-    if (!teacher || !teacher.teacherProfile) {
+    if (!teacher?.teacherProfile) {
       throw new NotFoundException('Teacher profile not found');
     }
+
+    const reviewSummary =
+      await this.reviewsService.getReviewSummaryForTeacher(teacherId);
 
     return {
       id: teacher.id,
@@ -225,9 +247,12 @@ export class TeacherService {
       bio: teacher.teacherProfile.bio ?? null,
       image_url: teacher.teacherProfile.image_url ?? null,
       joined_at: teacher.created_at,
+      average_rating: reviewSummary.average_rating,
+      review_count: reviewSummary.review_count,
     };
   }
-    async getMyProfile(userId: string) {
+
+  async getMyProfile(userId: string) {
     const profile = await this.profileRepo.findOne({
       where: {
         user: { id: userId },

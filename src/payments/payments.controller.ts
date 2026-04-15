@@ -7,13 +7,12 @@ import {
   UseGuards,
   Logger,
   BadRequestException,
+  Get,
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import type { Request, Response } from 'express';
 import Stripe from 'stripe';
 import { JwtAuthGuard } from 'src/auth/jwt.guard';
-import { RolesGuard } from 'src/auth/roles.guard';
-import { Roles } from 'src/auth/decorators/roles.decorator';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -27,8 +26,7 @@ export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Post('checkout')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('LEARNER')
+  @UseGuards(JwtAuthGuard)
   createCheckout(
     @CurrentUser() user: { id: string },
     @Body('bookingId') bookingId: string,
@@ -45,6 +43,12 @@ export class PaymentsController {
     }
 
     return this.paymentsService.createCheckoutSession(bookingId, user.id);
+  }
+
+  @Get('methods')
+  @UseGuards(JwtAuthGuard)
+  getSavedPaymentMethods(@CurrentUser() user: { id: string }) {
+    return this.paymentsService.listSavedPaymentMethods(user.id);
   }
 
   @Post('webhook')

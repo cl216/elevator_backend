@@ -1,15 +1,24 @@
-import { Module } from '@nestjs/common';
-import { BookingsController } from './bookings.controller';
-import { BookingsService } from './bookings.service';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Booking } from '../bookings/entities/booking.entity';
+import { Booking } from './entities/booking.entity';
+import { BookingsService } from './bookings.service';
+import { BookingsController } from './bookings.controller';
+import { BookingRemindersService } from './booking-reminders.service';
 import { Session } from '../sessions/entities/session.entity';
-import { User } from '../users/user.entity';
-import { BookingExpiryService } from './booking-expiry.service';
+import { Notification } from '../notifications/entities/notification.entity';
+import { PaymentsModule } from '../payments/payments.module';
+import { EmailModule } from '../email/email.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Booking, Session, User])],
+  imports: [
+    TypeOrmModule.forFeature([Booking, Session, Notification]),
+    forwardRef(() => PaymentsModule),
+    EmailModule,
+    NotificationsModule,
+  ],
   controllers: [BookingsController],
-  providers: [BookingsService, BookingExpiryService],
+  providers: [BookingsService, BookingRemindersService],
+  exports: [BookingsService],
 })
 export class BookingsModule {}

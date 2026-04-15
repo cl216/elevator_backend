@@ -1,6 +1,5 @@
 import {
   IsEmail,
-  IsEnum,
   IsString,
   MaxLength,
   MinLength,
@@ -18,7 +17,4 @@ export class RegisterDto {
   @MinLength(8)
   @MaxLength(100)
   password: string;
-
-  @IsEnum(['LEARNER', 'TEACHER'])
-  role: 'LEARNER' | 'TEACHER';
 }

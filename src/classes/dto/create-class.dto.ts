@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsOptional } from 'class-validator';
+import { IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateClassDto {
   @IsString()
@@ -12,5 +12,18 @@ export class CreateClassDto {
   description?: string;
 
   @IsNumber()
+  @Min(0.01)
   price: number;
+
+  @IsOptional()
+  @IsString()
+  image_url_1?: string;
+
+  @IsOptional()
+  @IsString()
+  image_url_2?: string;
+
+  @IsOptional()
+  @IsString()
+  image_url_3?: string;
 }

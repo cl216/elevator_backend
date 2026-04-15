@@ -1,6 +1,16 @@
-import { IsNotEmpty, IsString, IsInt, Min, Max } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsUUID,
+  IsInt,
+  Min,
+  Max,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateReviewDto {
+  @IsUUID()
   @IsNotEmpty()
   bookingId: string;
 
@@ -9,6 +19,8 @@ export class CreateReviewDto {
   @Max(5)
   rating: number;
 
+  @IsOptional()
   @IsString()
+  @MaxLength(1000)
   comment?: string;
 }

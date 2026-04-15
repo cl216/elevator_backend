@@ -2,12 +2,15 @@ import 'dotenv/config';
 import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 
+import { Category } from './categories/category.entity';
 import { User } from './users/user.entity';
 import { Class } from './classes/entities/class.entity';
 import { Session } from './sessions/entities/session.entity';
 import { Booking } from './bookings/entities/booking.entity';
 import { TeacherProfile } from './teacher/entities/teacher-profile.entity';
 import { TeacherFollower } from './teacher/entities/teacher-follower.entity';
+import { ClassRequest } from './class-requests/class-request.entity';
+import { Notification } from './notifications/entities/notification.entity';
 
 const dataSource = new DataSource({
   type: 'postgres',
@@ -17,7 +20,17 @@ const dataSource = new DataSource({
   password: process.env.DB_PASS ?? 'classes_pass',
   database: process.env.DB_NAME ?? 'classes',
 
-  entities: [User, Class, Session, Booking, TeacherProfile, TeacherFollower],
+  entities: [
+    User,
+    Class,
+    Session,
+    Booking,
+    TeacherProfile,
+    TeacherFollower,
+    ClassRequest,
+    Category,
+    Notification,
+  ],
   migrations: ['src/migrations/*.ts'],
 
   synchronize: false,

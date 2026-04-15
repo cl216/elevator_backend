@@ -10,6 +10,17 @@ import {
 import { User } from '../../users/user.entity';
 import { Session } from '../../sessions/entities/session.entity';
 
+export enum BookingStatus {
+  PENDING = 'PENDING',
+  CONFIRMED = 'CONFIRMED',
+  CANCELLED_BY_LEARNER = 'CANCELLED_BY_LEARNER',
+  CANCELLED_BY_TEACHER = 'CANCELLED_BY_TEACHER',
+  REFUND_PENDING = 'REFUND_PENDING',
+  REFUNDED = 'REFUNDED',
+  REFUND_FAILED = 'REFUND_FAILED',
+  EXPIRED = 'EXPIRED',
+}
+
 export enum PayoutStatus {
   NOT_PAID_OUT = 'NOT_PAID_OUT',
   PAID_OUT = 'PAID_OUT',
@@ -17,7 +28,7 @@ export enum PayoutStatus {
 }
 
 @Entity('bookings')
-@Index(['user', 'session'], { unique: true }) // prevents duplicate bookings
+@Index(['user', 'session'], { unique: true })
 export class Booking {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -32,24 +43,67 @@ export class Booking {
 
   @Column({
     type: 'enum',
-    enum: ['PENDING', 'CONFIRMED', 'CANCELLED'],
-    default: 'PENDING',
+    enum: BookingStatus,
+    default: BookingStatus.PENDING,
   })
-  status: 'PENDING' | 'CONFIRMED' | 'CANCELLED';
+  status: BookingStatus;
 
   @Column({ type: 'text', nullable: true })
   intro_message: string | null;
 
-  // Booking expiry (for pending payment window)
   @Column({ type: 'timestamp', nullable: true })
   expires_at: Date | null;
 
   @CreateDateColumn()
   createdAt: Date;
 
-  // -------------------------------
-  // Stripe Checkout / Payment Data
-  // -------------------------------
+  @Column({ type: 'timestamp', nullable: true })
+  confirmed_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  cancelled_at: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  cancelled_by_user_id: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  refunded_at: Date | null;
+
+  @Column({ type: 'int', nullable: true })
+  refund_amount: number | null;
+
+  @Column({ type: 'text', nullable: true })
+  stripe_refund_id: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  refund_failure_reason: string | null;
+
+  @Column({ type: 'int', default: 0 })
+  refund_retry_count: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  refund_last_retry_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  refund_next_retry_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reminder_24h_sent_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reminder_24h_failed_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reminder_1h_sent_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reminder_1h_failed_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  review_reminder_sent_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  review_reminder_failed_at: Date | null;
 
   @Column({ type: 'text', nullable: true })
   stripe_checkout_session_id: string | null;
@@ -60,7 +114,6 @@ export class Booking {
   @Column({ type: 'timestamp', nullable: true })
   paid_at: Date | null;
 
-  // Amount and currency at time of purchase
   @Column({ type: 'int', nullable: true })
   amount: number | null;
 
@@ -72,10 +125,6 @@ export class Booking {
 
   @Column({ type: 'timestamp', nullable: true })
   checkout_created_at: Date | null;
-
-  // -------------------------------
-  // Delayed Payout Fields (Phase 5)
-  // -------------------------------
 
   @Column({
     type: 'enum',

@@ -6,6 +6,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
+import { CategoriesModule } from './categories/categories.module';
+import { ClassRequestsModule } from './class-requests/class-requests.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { TeacherModule } from './teacher/teacher.module';
@@ -15,6 +17,7 @@ import { BookingsModule } from './bookings/bookings.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { HealthModule } from './health/health.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 
 @Module({
@@ -68,6 +71,9 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
     BookingsModule,
     PaymentsModule,
     ReviewsModule,
+    ClassRequestsModule,
+    CategoriesModule,
+    NotificationsModule,
   ],
   providers: [
     {

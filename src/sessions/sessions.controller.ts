@@ -1,91 +1,100 @@
 import {
-  Controller,
-  Post,
-  Get,
   Body,
-  Query,
+  Controller,
+  Delete,
+  Get,
   Param,
+  Patch,
+  Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { SessionsService } from './sessions.service';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt.guard';
-import { RolesGuard } from '../auth/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { SessionsService } from './sessions.service';
+import { CreateTeacherSessionDto } from './dto/create-teacher-session.dto';
 import { DuplicateSessionDto } from './dto/duplicate-session.dto';
 import { UpdateArrivalInstructionsDto } from './dto/update-arrival-instructions.dto';
+import { UpdateSessionDto } from './dto/update-session.dto';
 
 @Controller('sessions')
 export class SessionsController {
   constructor(private readonly sessionsService: SessionsService) {}
 
-  /**
-   * Create session (TEACHER only)
-   */
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('TEACHER')
-  @Post()
-  createSession(
-    @CurrentUser() user,
-    @Body()
-    body: {
-      classId: string;
-      start_time: string;
-      duration: number;
-      max_participants: number;
-      lat: number;
-      lng: number;
-    },
+  @Post('teacher/create')
+  @UseGuards(JwtAuthGuard)
+  createTeacherSession(
+    @CurrentUser() user: { id: string },
+    @Body() dto: CreateTeacherSessionDto,
   ) {
-    return this.sessionsService.createSession(
+    return this.sessionsService.createTeacherSessionFromSingleForm(
       user.id,
-      body.classId,
-      new Date(body.start_time),
-      body.duration,
-      body.max_participants,
-      body.lat,
-      body.lng,
+      dto,
     );
   }
 
-  /**
-   * Duplicate session (TEACHER only)
-   */
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('TEACHER')
-  @Post(':id/duplicate')
-  duplicateSession(
-    @Param('id') id: string,
-    @Body() dto: DuplicateSessionDto,
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  getMySessions(@CurrentUser() user: { id: string }) {
+    return this.sessionsService.getMySessions(user.id);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  updateSession(
     @CurrentUser() user: { id: string },
+    @Param('id') sessionId: string,
+    @Body() dto: UpdateSessionDto,
+  ) {
+    return this.sessionsService.updateSession(sessionId, user.id, dto);
+  }
+
+  @Post(':id/duplicate')
+  @UseGuards(JwtAuthGuard)
+  duplicateSession(
+    @CurrentUser() user: { id: string },
+    @Param('id') sessionId: string,
+    @Body() dto: DuplicateSessionDto,
   ) {
     return this.sessionsService.duplicateSession(
-      id,
+      sessionId,
       user.id,
       new Date(dto.start_time),
     );
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('TEACHER')
-  @Post(':id/arrival-instructions')
+  @Patch(':id/arrival-instructions')
+  @UseGuards(JwtAuthGuard)
   updateArrivalInstructions(
-    @Param('id') id: string,
-    @Body() dto: UpdateArrivalInstructionsDto,
     @CurrentUser() user: { id: string },
+    @Param('id') sessionId: string,
+    @Body() dto: UpdateArrivalInstructionsDto,
   ) {
     return this.sessionsService.updateArrivalInstructions(
-      id,
+      sessionId,
       user.id,
       dto.arrival_instructions,
     );
   }
 
-  /**
-   * Map query
-   */
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  cancelSession(
+    @CurrentUser() user: { id: string },
+    @Param('id') sessionId: string,
+  ) {
+    return this.sessionsService.cancelSession(sessionId, user.id);
+  }
+
   @Get('map')
-  getForMap(
+  @Throttle({
+    short: {
+      limit: 60,
+      ttl: 60_000,
+    },
+  })
+  getSessionsForMap(
     @Query('north') north: string,
     @Query('south') south: string,
     @Query('east') east: string,
@@ -101,11 +110,8 @@ export class SessionsController {
     );
   }
 
-  /**
-   * Full session fetch (tap marker)
-   */
   @Get(':id')
-  getById(@Param('id') id: string) {
+  getSessionById(@Param('id') id: string) {
     return this.sessionsService.getSessionById(id);
   }
 }

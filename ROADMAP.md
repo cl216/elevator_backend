@@ -1,247 +1,192 @@
-# Elevator Project Roadmap
 
-Marketplace for in-home classes where teachers host sessions and learners discover and book nearby experiences.
 
----
 
-# Completed Phases
+# Elevator Roadmap
 
-## Core Platform
-- [x] Phase 1 — Map discovery
-- [x] Phase 2 — Booking engine
-- [x] Phase 3 — Stripe checkout
-- [x] Phase 4 — Payment safety
-- [x] Phase 5 — Delayed payouts
-- [x] Phase 5.5 — Duplicate sessions
-- [x] Phase 6 — Location privacy
-- [x] Phase 7 — Arrival instructions
-- [x] Phase 8 — Map clustering
-- [x] Phase 8.5 — Follow teachers
+## Completed
 
-## Trust & Safety
-- [x] Phase 9 — Trust Stack
-  - learner intro message
-  - contact blocking / anti-disintermediation
-  - learner first name
-  - booking trust info
+### Phase 1 — Identity & User Model
+- [x] Remove learner/teacher role selection
+- [x] Unified signup flow
+- [x] All users start as normal users
+- [x] Add Become a teacher CTA
+- [x] Teacher onboarding flow
+- [x] Create teacher profile
+- [x] Stripe onboarding for payouts
+- [x] Unlock Teach tab
+- [x] Dynamically show Teach tab
+- [x] Prevent teachers booking their own sessions
+- [x] Add Bookings tab for learners
 
-## Infrastructure
-- [x] Phase 10 — Production Hardening
-  - rate limiting
-  - request logging
-  - structured logs
-  - cron logging
-  - health endpoint
-  - environment validation
-  - deployment checklist
-  - backup / restore plan
-  - smoke test checklist
+### Phase 3 — Structured Communication
+- [x] Learner intro message in booking flow
+- [x] Show intro message in teacher dashboard
+- [x] Teacher class/session message foundation exists
+- [x] Arrival instructions implemented
+- [x] Arrival instructions editable by teacher
 
----
+### Phase 4 — Discovery Improvements
+- [x] Show people going
+- [x] Show spots left
 
-# Current Milestone
-## Phase 11A — Learner Booking Flow MVP
+### Phase 5 — Community Signals
+- [x] Show first names of attendees
 
-Goal: Complete the core marketplace loop.
+### Phase 6 — Map UX & Reliability
+- [x] Map discovery
+- [x] Marker clustering
+- [x] Category filtering
+- [x] Search this area button
+- [x] Nearby suggestions
+- [x] /sessions/nearby endpoint
+- [x] Suggest 3 nearest sessions
+- [x] Suggestion box close button
+- [x] Tapping suggestion zooms to map location
+- [x] Recenter-to-user button
+- [x] “You are here” location marker
+- [x] Stop auto-fetching sessions on pan
+- [x] Faster Search this area appearance
+- [ ] Preserve markers while fetching
+- [ ] Highlight selected marker
+- [ ] Slight lift animation for selected marker
 
-Discover → Inspect → Reserve → Pay → Confirm
+### Teacher Tools / Core Marketplace
+- [x] Map discovery
+- [x] Session modal
+- [x] Booking flow
+- [x] Teacher dashboard
+- [x] Create class
+- [x] Create session
+- [x] Address autocomplete
+- [x] Map location preview
+- [x] Duplicate session
+- [x] Cancel safeguards
+- [x] View bookings
+- [x] Learner bookings screen
+- [x] Friendlier Stripe gating for session creation
 
-### Frontend
-- [ ] Create `src/api/bookings.ts`
-- [ ] Create `src/api/payments.ts`
-- [ ] Wire **Reserve button** to booking flow
-- [ ] Add **intro message input**
-- [ ] Call `POST /bookings`
-- [ ] Call `POST /payments/checkout`
-- [ ] Redirect to Stripe checkout
-- [ ] Handle success redirect
-- [ ] Handle cancel redirect
-- [ ] Show booking confirmed UI
-
-### UX
-- [ ] Loading state during booking creation
-- [ ] Error state if booking/payment fails
-- [ ] Booking confirmation screen
-
----
-
-# Phase 11B — Teacher Profile UX
-
-Goal: Improve trust and identity.
-
-### Frontend
-- [ ] Create teacher profile screen
-- [ ] Route: `/teacher/[id]`
-- [ ] Make teacher name in session modal clickable
-- [ ] Fetch teacher profile data
-- [ ] Show teacher bio
-- [ ] Show teacher avatar
-- [ ] Follow/unfollow from profile page
-
-### Backend
-- [ ] Add public teacher profile endpoint if needed
+### Payments
+- [x] Stripe checkout
+- [x] Delayed payouts
+- [x] Booking lifecycle
 
 ---
 
-# Phase 11C — Discovery UX Improvements
+## Still To Do
 
-Goal: Improve map browsing.
+### Phase 2 — Notifications
+- [ ] Push notifications
+- [ ] In-app notification inbox
+- [ ] Unread indicators
+- [ ] Badge counters
+- [ ] Booking confirmation email
+- [ ] Session reminder email
+- [ ] Cancellation emails
 
-### Frontend
-- [ ] Convert “Browse classes near you” into filter bar
-- [ ] Add category chips
-- [ ] Add loading indicator on map fetch
-- [ ] Improve modal styling
-- [ ] Improve map header styling
+### Auth / Account Security
+- [ ] Proper forgot-password email flow polish
+- [ ] Email verification flow polish
+- [ ] Deep link app handling for verification/reset
+- [ ] Buy custom domain for Resend
+- [ ] Send branded production emails from custom domain
 
-### Backend
-- [ ] Add optional category filter to `/sessions/map`
+### Phase 3 — Structured Communication Polish
+- [x] Confirm teacher class/session message is shown before booking
+- [x] Confirm teacher class/session message is shown in session modal
+- [x] Confirm teacher class/session message is shown after booking
+- [ ] Ensure arrival instructions are clearly visible after booking
+- [ ] Clean up wording / presentation
 
-Example:
-/sessions/map?north=...&south=...&east=...&west=...&category=art
+### Phase 6 — Map UX Polish
+- [x] Recheck preserve markers while fetching
+- [ ] Selected marker highlight state
+- [ ] Selected marker lift animation
 
----
+### Phase 7 — Explanation Cards
+- [x] Reusable ExplainCard component
+- [x] Persist dismissed cards in local storage
+- [x] Show each card once
+- [x] Learner map intro card
+- [x] Teacher teach tab intro
+- [x] Session creation hint
+- [x] Bookings page explanation
+- [ ] First booking celebration card
+- [x] Overall polish
 
-# Phase 11D — Teacher Dashboard MVP
+### Phase 8 — Teacher Supply Growth
+- [ ] Weekly recurrence
+- [ ] Bi-weekly recurrence
+- [ ] Monthly recurrence
+- [ ] Repeat for X weeks
+- [ ] Quick repeat next week
 
-Goal: Make teacher side usable.
+### Phase 9 — Teacher Insights
+- [ ] session_views table
+- [ ] Track session modal views
+- [ ] Show views in teacher dashboard
 
-### Teacher onboarding
-- [ ] Teacher profile setup screen
-- [ ] Stripe onboarding status UI
-- [ ] Stripe onboarding button
+### Phase 10 — Viral Growth
+- [ ] Invite a friend
+- [ ] Share session link
+- [ ] Native share sheet
+- [ ] Deep linking for shared sessions
+- [ ] Public session preview page
+- [ ] Open shared session in app
+- [ ] Book together later
 
-### Teacher tools
-- [ ] Create class UI
-- [ ] Create session UI
-- [ ] View own sessions
-- [ ] Duplicate session UI
-- [ ] Edit arrival instructions UI
+### Phase 11 — Demand Signals
+- [x] class_requests table
+- [x] Request a class flow for empty areas
+- [x] Capture category + location
+- [x] Teacher demand dashboard
+- [x] Allowing teachers to create new categories following approval
+- [ ] Demand heatmap later
 
-### Trust view
-- [ ] View bookings for own sessions
-- [ ] Show learner trust information
+### Phase 12 — Reviews & Ratings
+- [ ] Teacher star ratings
+- [ ] Written reviews
+- [ ] Class quality rating
+- [ ] Group experience rating
 
----
+### Phase 13 — Payments & Finance
+- [ ] Teacher cancellation refunds
+- [ ] Learner cancellation refunds
+- [ ] Teacher earnings dashboard
+- [ ] possible recepts needed to users and teachers?
 
-# Phase 11E — Auth & Onboarding UX
 
-Goal: Reduce signup friction.
+### Phase 14 — Admin & Moderation
+- [ ] Admin dashboard
+- [ ] Manage users
+- [ ] Manage sessions
+- [ ] Handle reports
+- [ ] Moderation tools
 
-### Auth
-- [ ] Google sign-in
-- [ ] Email verification flow
-- [ ] Forgot password flow
-- [ ] Reset password flow
+### Phase 15 — City Launch Strategy
+- [ ] Recruit 5–10 teachers
+- [ ] Seed 30–50 sessions
+- [ ] Encourage recurring sessions
+- [ ] Focus supply in central neighborhoods
+- [ ] Ensure clusters appear on map
 
-### UX polish
-- [ ] Improve login/register styling
-- [ ] Better error states
-- [ ] Auth loading state
 
----
+###### Make sure:
+- [ ] make sure real teacher location gets exposed to learners once they have booked
+- [ ] receipts?
+- [ ] cleanup + polish
+- [ ] Teacher booking own session equals 500 error
+- [ ] email password verification
+- [ ] on long app sleep, token expires for notifications(and maybe other)
+- [] polish map and flow
+- [] polish helper cards(older tech-weak adults need to use app)
+- [] temp disable resend to allow teting
+- [] double opening sessions error
+- maybe make classes+sessions coupling just one for ease of use.
+- teachers name and avatar on session/class clicking to teacher profile
+- TEACHERS CONFIRM PENDING BOOKING AND THIS NOTIFIES USER
+- USER DOESNT NEED TO GO THROUGH STRIPE PAYMENT EVERY TIME, QUICK BUY CLASSES[express account?]
+- ensure follow funtionality is working
+- dont show reserve or booking in own bookers session
+- when user goes back into app after exitting, but still logged in, map markers should be updated
 
-# Phase 12 — Notifications
-
-Goal: Improve retention.
-
-### Backend
-- [ ] Create `device_tokens` table
-- [ ] Store device tokens per user
-- [ ] Endpoint to register push token
-- [ ] Notification sending service
-
-### Mobile
-- [ ] Request push notification permission
-- [ ] Send push token to backend
-
-### Notification triggers
-- [ ] Booking confirmed notification
-- [ ] Session reminder notification
-- [ ] Arrival instructions updated notification
-- [ ] Teacher posted new class notification
-
----
-
-# Phase 13 — Admin Tools
-
-Goal: Marketplace moderation.
-
-- [ ] Admin remove session endpoint
-- [ ] Admin suspend teacher endpoint
-- [ ] Admin issue refund endpoint
-- [ ] Admin view payouts
-- [ ] Admin view users
-- [ ] Admin manage categories
-
----
-
-# Phase 14 — Teacher Growth Tools
-
-Goal: Help teachers improve classes.
-
-- [ ] Session analytics
-- [ ] Attendance stats
-- [ ] Repeat learner tracking
-- [ ] Improved duplicate session workflow
-- [ ] Teacher dashboard metrics
-
----
-
-# Phase 15 — Reviews
-
-Goal: Add social proof once marketplace has activity.
-
-### Backend
-- [ ] Create `reviews` table
-- [ ] Migration
-- [ ] Review entity
-- [ ] Create review endpoint
-- [ ] Only allow after session ends
-- [ ] One review per booking
-- [ ] Aggregate teacher rating
-
-### Frontend
-- [ ] Review submission UI
-- [ ] Show reviews on teacher profile
-
----
-
-# Design System & UI Polish
-
-These can be implemented gradually across phases.
-
-- [ ] Define spacing scale
-- [ ] Define typography scale
-- [ ] Define border radius tokens
-- [ ] Create reusable buttons
-- [ ] Create reusable cards
-- [ ] Create reusable input components
-- [ ] Create filter chips
-- [ ] Improve modal styling
-- [ ] Improve empty states
-- [ ] Improve loading states
-
----
-
-# Marketplace Loop Checklist
-
-The app should support the full loop:
-
-- [x] Discover sessions
-- [x] Inspect session details
-- [x] Follow teachers
-- [ ] Reserve session
-- [ ] Pay via Stripe
-- [ ] Booking confirmation
-- [ ] Attend session
-- [ ] Leave review
-
----
-
-# Long Term Goals
-
-- grow local class supply
-- improve teacher retention
-- improve learner repeat bookings
-- build trusted in-home learning marketplace
+issue with closing app and token expiring

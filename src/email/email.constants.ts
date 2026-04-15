@@ -1,0 +1,1 @@
+export const EMAIL_FROM = 'Elevator <no-reply@yourdomain.com>';

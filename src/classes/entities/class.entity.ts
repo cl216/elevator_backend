@@ -22,9 +22,18 @@ export class Class {
   @Column()
   category: string;
 
-  @Column({ nullable: true })
-  description: string;
+@Column({ type: 'text', nullable: true })
+description: string | null;
 
   @Column({ type: 'decimal' })
   price: number;
+
+  @Column({ type: 'text', nullable: true })
+  image_url_1: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  image_url_2: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  image_url_3: string | null;
 }

@@ -1,12 +1,18 @@
 import {
   Entity,
   PrimaryGeneratedColumn,
-  JoinColumn,
   Column,
   ManyToOne,
+  JoinColumn,
 } from 'typeorm';
-import { Class } from '../../classes/entities/class.entity';
+import { Point } from 'geojson';
 import { User } from '../../users/user.entity';
+import { Class } from '../../classes/entities/class.entity';
+
+export enum SessionStatus {
+  ACTIVE = 'ACTIVE',
+  CANCELLED = 'CANCELLED',
+}
 
 @Entity('sessions')
 export class Session {
@@ -14,7 +20,7 @@ export class Session {
   id: string;
 
   @ManyToOne(() => Class, { nullable: false })
-  @JoinColumn({ name: 'class_id' }) // ✅ THIS IS THE FIX
+  @JoinColumn({ name: 'class_id' })
   class: Class;
 
   @ManyToOne(() => User, { nullable: false })
@@ -33,16 +39,29 @@ export class Session {
   @Column({ type: 'int' })
   max_participants: number;
 
-  @Column({ type: 'int' })
+  @Column({ type: 'decimal' })
   price: number;
 
   @Column({
-    type: 'geography',
+    type: 'geometry',
     spatialFeatureType: 'Point',
     srid: 4326,
   })
-  location: object;
+  location: Point;
+
+  @Column({ type: 'text', nullable: true })
+  rough_location: string | null;
 
   @Column({ type: 'text', nullable: true })
   arrival_instructions: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: SessionStatus,
+    default: SessionStatus.ACTIVE,
+  })
+  status: SessionStatus;
+
+  @Column({ type: 'timestamp', nullable: true })
+  cancelled_at: Date | null;
 }

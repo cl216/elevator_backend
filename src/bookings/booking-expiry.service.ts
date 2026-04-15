@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { DataSource } from 'typeorm';
-import { Booking } from './entities/booking.entity';
+import { Booking, BookingStatus } from './entities/booking.entity';
 
 @Injectable()
 export class BookingExpiryService {
@@ -23,7 +23,7 @@ export class BookingExpiryService {
         .getRepository(Booking)
         .createQueryBuilder()
         .update(Booking)
-        .set({ status: 'CANCELLED' })
+        .set({ status: BookingStatus.EXPIRED })
         .where('status = :status', { status: 'PENDING' })
         .andWhere('expires_at IS NOT NULL')
         .andWhere('expires_at < :now', { now })
