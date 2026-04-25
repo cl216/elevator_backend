@@ -4,14 +4,21 @@ import {
   Column,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Point } from 'geojson';
 import { User } from '../../users/user.entity';
 import { Class } from '../../classes/entities/class.entity';
+import { PrivateSessionRequest } from '../../private-lessons/entities/private-lesson-request.entity';
 
 export enum SessionStatus {
   ACTIVE = 'ACTIVE',
   CANCELLED = 'CANCELLED',
+}
+
+export enum SessionType {
+  GROUP = 'GROUP',
+  PRIVATE = 'PRIVATE',
 }
 
 @Entity('sessions')
@@ -64,4 +71,20 @@ export class Session {
 
   @Column({ type: 'timestamp', nullable: true })
   cancelled_at: Date | null;
+
+  @Column({
+    type: 'enum',
+    enum: SessionType,
+    default: SessionType.GROUP,
+  })
+  @Index('idx_sessions_session_type')
+  session_type: SessionType;
+
+  @ManyToOne(() => PrivateSessionRequest, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'private_request_id' })
+  private_request: PrivateSessionRequest | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  @Index('idx_sessions_private_invitee_user_id')
+  private_invitee_user_id: string | null;
 }

@@ -19,6 +19,7 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { HealthModule } from './health/health.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import { PrivateSessionRequestsModule } from './private-lessons/private-lessons.module';
 
 @Module({
   imports: [
@@ -74,6 +75,8 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
     ClassRequestsModule,
     CategoriesModule,
     NotificationsModule,
+    PrivateSessionRequestsModule,
+
   ],
   providers: [
     {

@@ -11,6 +11,7 @@ import { TeacherProfile } from './teacher/entities/teacher-profile.entity';
 import { TeacherFollower } from './teacher/entities/teacher-follower.entity';
 import { ClassRequest } from './class-requests/class-request.entity';
 import { Notification } from './notifications/entities/notification.entity';
+import { PrivateSessionRequest } from './private-lessons/entities/private-lesson-request.entity';
 
 const dataSource = new DataSource({
   type: 'postgres',
@@ -30,6 +31,7 @@ const dataSource = new DataSource({
     ClassRequest,
     Category,
     Notification,
+    PrivateSessionRequest,
   ],
   migrations: ['src/migrations/*.ts'],
 

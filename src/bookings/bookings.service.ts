@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { DataSource, QueryFailedError } from 'typeorm';
 import { Booking, BookingStatus } from './entities/booking.entity';
-import { Session } from '../sessions/entities/session.entity';
+import { Session, SessionType } from '../sessions/entities/session.entity';
 import { Notification } from '../notifications/entities/notification.entity';
 import { containsBlockedContactOrOffPlatformContent } from '../utils/content-moderation';
 import { EmailService } from '../email/email.service';
@@ -99,6 +99,26 @@ export class BookingsService {
         throw new BadRequestException('You cannot book your own session');
       }
 
+      if (sessionWithTeacher.session_type === SessionType.PRIVATE) {
+        if (!sessionWithTeacher.private_invitee_user_id) {
+          this.logger.warn(
+            `BOOKING_CREATE_PRIVATE_SESSION_NO_INVITEE userId=${userId} sessionId=${sessionId}`,
+          );
+          throw new ForbiddenException(
+            'This private session is not available for booking.',
+          );
+        }
+
+        if (sessionWithTeacher.private_invitee_user_id !== userId) {
+          this.logger.warn(
+            `BOOKING_CREATE_PRIVATE_SESSION_FORBIDDEN userId=${userId} sessionId=${sessionId} inviteeUserId=${sessionWithTeacher.private_invitee_user_id}`,
+          );
+          throw new ForbiddenException(
+            'This private session is only available to the invited learner.',
+          );
+        }
+      }
+
       const now = new Date();
       if (session.start_time <= now) {
         this.logger.warn(
@@ -183,7 +203,6 @@ export class BookingsService {
 
         throw error;
       }
-      
 
       await manager.getRepository(Notification).save(
         manager.getRepository(Notification).create({
@@ -538,6 +557,7 @@ export class BookingsService {
         's.max_participants AS session_max_participants',
         's.rough_location AS session_rough_location',
         's.arrival_instructions AS session_arrival_instructions',
+        's.session_type AS session_type',
 
         'c.title AS class_title',
         'c.category AS class_category',
@@ -964,7 +984,7 @@ export class BookingsService {
     return 'Location shared in the app';
   }
 
-    async getBookingDetailsForLearner(bookingId: string, learnerId: string) {
+  async getBookingDetailsForLearner(bookingId: string, learnerId: string) {
     this.logger.log(
       `BOOKING_GET_DETAILS_ATTEMPT bookingId=${bookingId} learnerId=${learnerId}`,
     );
@@ -1017,6 +1037,9 @@ export class BookingsService {
             max_participants: booking.session.max_participants,
             rough_location: booking.session.rough_location,
             arrival_instructions: booking.session.arrival_instructions,
+            session_type: booking.session.session_type ?? SessionType.GROUP,
+            private_invitee_user_id:
+              booking.session.private_invitee_user_id ?? null,
             class: booking.session.class
               ? {
                   title: booking.session.class.title,

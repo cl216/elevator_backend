@@ -6,12 +6,17 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { stableOffsetCoordinates } from '../utils/location-offset';
-import { Session, SessionStatus } from '../sessions/entities/session.entity';
+import {
+  Session,
+  SessionStatus,
+  SessionType,
+} from '../sessions/entities/session.entity';
 import { Class } from '../classes/entities/class.entity';
 import { User } from '../users/user.entity';
 import { Booking } from '../bookings/entities/booking.entity';
 import { UpdateSessionDto } from './dto/update-session.dto';
 import { CreateTeacherSessionDto } from './dto/create-teacher-session.dto';
+import { PrivateSessionRequest } from '../private-lessons/entities/private-lesson-request.entity';
 
 const PRIMARY_CATEGORY_SLUGS = [
   'art',
@@ -20,6 +25,27 @@ const PRIMARY_CATEGORY_SLUGS = [
   'language',
   'crafts',
 ];
+
+type CreateSessionInternalInput = {
+  teacher: User;
+  title: string;
+  category: string;
+  description?: string | null;
+  price: number;
+  image_url_1?: string | null;
+  image_url_2?: string | null;
+  image_url_3?: string | null;
+  start_time: Date;
+  duration: number;
+  max_participants: number;
+  lat: number;
+  lng: number;
+  rough_location?: string | null;
+  arrival_instructions?: string | null;
+  session_type?: SessionType;
+  private_request?: PrivateSessionRequest | null;
+  private_invitee_user_id?: string | null;
+};
 
 @Injectable()
 export class SessionsService {
@@ -37,10 +63,7 @@ export class SessionsService {
     private readonly bookingsRepository: Repository<Booking>,
   ) {}
 
-  async createTeacherSessionFromSingleForm(
-    teacherId: string,
-    dto: CreateTeacherSessionDto,
-  ): Promise<Session> {
+  private async assertTeacherCanCreatePaidSessions(teacherId: string) {
     const teacher = await this.usersRepository.findOne({
       where: { id: teacherId },
       relations: { teacherProfile: true } as any,
@@ -56,11 +79,43 @@ export class SessionsService {
       );
     }
 
-    const title = dto.title?.trim();
-    const category = dto.category?.trim();
-    const description = dto.description?.trim() || null;
-    const roughLocation = dto.rough_location?.trim() || null;
-    const arrivalInstructions = dto.arrival_instructions?.trim() || null;
+    return teacher;
+  }
+
+  private async ensureNoOverlappingActiveSession(
+    teacherId: string,
+    start: Date,
+    end: Date,
+    excludeSessionId?: string,
+  ) {
+    const query = this.sessionsRepository
+      .createQueryBuilder('session')
+      .where('session.teacher_id = :teacherId', { teacherId })
+      .andWhere('session.status = :status', { status: SessionStatus.ACTIVE })
+      .andWhere('session.start_time < :newEnd', { newEnd: end })
+      .andWhere('session.end_time > :newStart', { newStart: start });
+
+    if (excludeSessionId) {
+      query.andWhere('session.id != :excludeSessionId', { excludeSessionId });
+    }
+
+    const overlappingSession = await query.getOne();
+
+    if (overlappingSession) {
+      throw new BadRequestException(
+        'You already have another session that overlaps with this time.',
+      );
+    }
+  }
+
+  private async createSessionWithClass(
+    input: CreateSessionInternalInput,
+  ): Promise<Session> {
+    const title = input.title?.trim();
+    const category = input.category?.trim();
+    const description = input.description?.trim() || null;
+    const roughLocation = input.rough_location?.trim() || null;
+    const arrivalInstructions = input.arrival_instructions?.trim() || null;
 
     if (!title) {
       throw new BadRequestException('Title is required');
@@ -70,19 +125,22 @@ export class SessionsService {
       throw new BadRequestException('Category is required');
     }
 
-    if (!Number.isFinite(dto.price) || dto.price <= 0) {
+    if (!Number.isFinite(input.price) || input.price <= 0) {
       throw new BadRequestException('Invalid price');
     }
 
-    if (!Number.isFinite(dto.duration) || dto.duration <= 0) {
+    if (!Number.isFinite(input.duration) || input.duration <= 0) {
       throw new BadRequestException('Invalid duration');
     }
 
-    if (!Number.isFinite(dto.max_participants) || dto.max_participants <= 0) {
+    if (
+      !Number.isFinite(input.max_participants) ||
+      input.max_participants <= 0
+    ) {
       throw new BadRequestException('Invalid max_participants');
     }
 
-    if (!Number.isFinite(dto.lat) || !Number.isFinite(dto.lng)) {
+    if (!Number.isFinite(input.lat) || !Number.isFinite(input.lng)) {
       throw new BadRequestException('Invalid location');
     }
 
@@ -92,63 +150,140 @@ export class SessionsService {
       );
     }
 
-    const start = new Date(dto.start_time);
-    if (isNaN(start.getTime())) {
+    if (
+      !(input.start_time instanceof Date) ||
+      isNaN(input.start_time.getTime())
+    ) {
       throw new BadRequestException('Invalid start_time');
     }
 
-    if (start <= new Date()) {
+    if (input.start_time <= new Date()) {
       throw new BadRequestException('Session must be in the future');
     }
 
-    const endTime = new Date(start.getTime() + dto.duration * 60_000);
+    const endTime = new Date(
+      input.start_time.getTime() + input.duration * 60_000,
+    );
 
-    const overlappingSession = await this.sessionsRepository
-      .createQueryBuilder('session')
-      .where('session.teacher_id = :teacherId', { teacherId })
-      .andWhere('session.status = :status', { status: SessionStatus.ACTIVE })
-      .andWhere('session.start_time < :newEnd', { newEnd: endTime })
-      .andWhere('session.end_time > :newStart', { newStart: start })
-      .getOne();
-
-    if (overlappingSession) {
-      throw new BadRequestException(
-        'You already have another session that overlaps with this time.',
-      );
-    }
+    await this.ensureNoOverlappingActiveSession(
+      input.teacher.id,
+      input.start_time,
+      endTime,
+    );
 
     const classEntity = this.classesRepository.create({
-      teacher,
+      teacher: input.teacher,
       title,
       category,
       description,
-      price: dto.price,
-      image_url_1: dto.image_url_1?.trim() || null,
-      image_url_2: dto.image_url_2?.trim() || null,
-      image_url_3: dto.image_url_3?.trim() || null,
+      price: input.price,
+      image_url_1: input.image_url_1?.trim() || null,
+      image_url_2: input.image_url_2?.trim() || null,
+      image_url_3: input.image_url_3?.trim() || null,
     });
 
     const savedClass = await this.classesRepository.save(classEntity);
 
     const session = this.sessionsRepository.create({
       class: savedClass,
-      teacher,
-      start_time: start,
-      duration: dto.duration,
+      teacher: input.teacher,
+      start_time: input.start_time,
+      duration: input.duration,
       end_time: endTime,
-      max_participants: dto.max_participants,
+      max_participants: input.max_participants,
       location: {
         type: 'Point',
-        coordinates: [dto.lng, dto.lat],
+        coordinates: [input.lng, input.lat],
       },
-      price: dto.price,
+      price: input.price,
       rough_location: roughLocation,
       arrival_instructions: arrivalInstructions,
       status: SessionStatus.ACTIVE,
       cancelled_at: null,
+      session_type: input.session_type ?? SessionType.GROUP,
+      private_request: input.private_request ?? null,
+      private_invitee_user_id: input.private_invitee_user_id ?? null,
     });
 
     return this.sessionsRepository.save(session);
+  }
+
+  async createTeacherSessionFromSingleForm(
+    teacherId: string,
+    dto: CreateTeacherSessionDto,
+  ): Promise<Session> {
+    const teacher = await this.assertTeacherCanCreatePaidSessions(teacherId);
+
+    const start = new Date(dto.start_time);
+    if (isNaN(start.getTime())) {
+      throw new BadRequestException('Invalid start_time');
+    }
+
+    return this.createSessionWithClass({
+      teacher,
+      title: dto.title,
+      category: dto.category,
+      description: dto.description ?? null,
+      price: dto.price,
+      image_url_1: dto.image_url_1 ?? null,
+      image_url_2: dto.image_url_2 ?? null,
+      image_url_3: dto.image_url_3 ?? null,
+      start_time: start,
+      duration: dto.duration,
+      max_participants: dto.max_participants,
+      lat: dto.lat,
+      lng: dto.lng,
+      rough_location: dto.rough_location ?? null,
+      arrival_instructions: dto.arrival_instructions ?? null,
+      session_type: SessionType.GROUP,
+      private_request: null,
+      private_invitee_user_id: null,
+    });
+  }
+
+  async createAcceptedPrivateSession(params: {
+    teacherId: string;
+    privateRequest: PrivateSessionRequest;
+    title: string;
+    category: string;
+    description?: string | null;
+    price: number;
+    start_time: string;
+    duration: number;
+    lat: number;
+    lng: number;
+    rough_location: string;
+    arrival_instructions?: string | null;
+  }): Promise<Session> {
+    const teacher = await this.assertTeacherCanCreatePaidSessions(
+      params.teacherId,
+    );
+
+    const start = new Date(params.start_time);
+    if (isNaN(start.getTime())) {
+      throw new BadRequestException('Invalid start_time');
+    }
+
+    return this.createSessionWithClass({
+      teacher,
+      title: params.title,
+      category: params.category,
+      description: params.description ?? null,
+      price: params.price,
+      image_url_1: null,
+      image_url_2: null,
+      image_url_3: null,
+      start_time: start,
+      duration: params.duration,
+      max_participants: 1,
+      lat: params.lat,
+      lng: params.lng,
+      rough_location: params.rough_location,
+      arrival_instructions: params.arrival_instructions ?? null,
+      session_type: SessionType.PRIVATE,
+      private_request: params.privateRequest,
+      private_invitee_user_id: params.privateRequest.learner?.id ?? null,
+    });
   }
 
   async updateSession(
@@ -220,20 +355,12 @@ export class SessionsService {
 
     const nextEnd = new Date(nextStart.getTime() + nextDuration * 60_000);
 
-    const overlappingSession = await this.sessionsRepository
-      .createQueryBuilder('session')
-      .where('session.teacher_id = :teacherId', { teacherId })
-      .andWhere('session.id != :sessionId', { sessionId })
-      .andWhere('session.status = :status', { status: SessionStatus.ACTIVE })
-      .andWhere('session.start_time < :newEnd', { newEnd: nextEnd })
-      .andWhere('session.end_time > :newStart', { newStart: nextStart })
-      .getOne();
-
-    if (overlappingSession) {
-      throw new BadRequestException(
-        'You already have another session that overlaps with this time.',
-      );
-    }
+    await this.ensureNoOverlappingActiveSession(
+      teacherId,
+      nextStart,
+      nextEnd,
+      sessionId,
+    );
 
     session.start_time = nextStart;
     session.end_time = nextEnd;
@@ -354,19 +481,7 @@ export class SessionsService {
 
     const endTime = new Date(start.getTime() + original.duration * 60_000);
 
-    const overlappingSession = await this.sessionsRepository
-      .createQueryBuilder('session')
-      .where('session.teacher_id = :teacherId', { teacherId })
-      .andWhere('session.status = :status', { status: SessionStatus.ACTIVE })
-      .andWhere('session.start_time < :newEnd', { newEnd: endTime })
-      .andWhere('session.end_time > :newStart', { newStart: start })
-      .getOne();
-
-    if (overlappingSession) {
-      throw new BadRequestException(
-        'You already have another session that overlaps with this time.',
-      );
-    }
+    await this.ensureNoOverlappingActiveSession(teacherId, start, endTime);
 
     const duplicated = this.sessionsRepository.create({
       class: original.class,
@@ -374,13 +489,22 @@ export class SessionsService {
       start_time: start,
       end_time: endTime,
       duration: original.duration,
-      max_participants: original.max_participants,
+      max_participants:
+        original.session_type === SessionType.PRIVATE
+          ? 1
+          : original.max_participants,
       price: original.price,
       location: original.location,
       rough_location: original.rough_location ?? null,
       arrival_instructions: original.arrival_instructions ?? null,
       status: SessionStatus.ACTIVE,
       cancelled_at: null,
+      session_type:
+        original.session_type === SessionType.PRIVATE
+          ? SessionType.GROUP
+          : original.session_type ?? SessionType.GROUP,
+      private_request: null,
+      private_invitee_user_id: null,
     });
 
     return this.sessionsRepository.save(duplicated);
@@ -488,13 +612,17 @@ export class SessionsService {
         'session.start_time AS start_time',
         'tp.full_name AS teacher_name',
         'tp.image_url AS teacher_avatar_url',
+        'session.session_type AS session_type',
       ])
       .where(
         `(session.location::geometry) && ST_MakeEnvelope(:west, :south, :east, :north, 4326)`,
         { north, south, east, west },
       )
       .andWhere('session.start_time > NOW()')
-      .andWhere('session.status = :status', { status: SessionStatus.ACTIVE });
+      .andWhere('session.status = :status', { status: SessionStatus.ACTIVE })
+      .andWhere('session.session_type = :sessionType', {
+        sessionType: SessionType.GROUP,
+      });
 
     if (category && category !== 'all') {
       if (category === 'other') {
@@ -542,6 +670,8 @@ export class SessionsService {
         'session.arrival_instructions AS arrival_instructions',
         'session.status AS status',
         'session.cancelled_at AS cancelled_at',
+        'session.session_type AS session_type',
+        'session.private_invitee_user_id AS private_invitee_user_id',
         'ST_Y(session.location::geometry) AS lat',
         'ST_X(session.location::geometry) AS lng',
         'class.id AS class_id',
@@ -562,15 +692,25 @@ export class SessionsService {
       throw new BadRequestException('Session not found');
     }
 
-    const bookingsCount = await this.bookingsRepository
+    const bookingsQuery = this.bookingsRepository
       .createQueryBuilder('booking')
       .where('booking.session_id = :sessionId', { sessionId })
       .andWhere('booking.status IN (:...statuses)', {
         statuses: ['PENDING', 'CONFIRMED'],
-      })
-      .getCount();
+      });
 
-    const attendeeRows = await this.bookingsRepository
+    if (
+      sessionRow.session_type === SessionType.PRIVATE &&
+      sessionRow.private_invitee_user_id
+    ) {
+      bookingsQuery.andWhere('booking.user_id = :inviteeUserId', {
+        inviteeUserId: sessionRow.private_invitee_user_id,
+      });
+    }
+
+    const bookingsCount = await bookingsQuery.getCount();
+
+    const attendeeRowsQuery = this.bookingsRepository
       .createQueryBuilder('booking')
       .leftJoin('booking.user', 'user')
       .select([
@@ -582,8 +722,18 @@ export class SessionsService {
         statuses: ['PENDING', 'CONFIRMED'],
       })
       .orderBy('booking.createdAt', 'ASC')
-      .limit(3)
-      .getRawMany();
+      .limit(3);
+
+    if (
+      sessionRow.session_type === SessionType.PRIVATE &&
+      sessionRow.private_invitee_user_id
+    ) {
+      attendeeRowsQuery.andWhere('booking.user_id = :inviteeUserId', {
+        inviteeUserId: sessionRow.private_invitee_user_id,
+      });
+    }
+
+    const attendeeRows = await attendeeRowsQuery.getRawMany();
 
     const attendee_first_names = attendeeRows
       .map((row) => (row.first_name ?? '').trim())
@@ -612,6 +762,8 @@ export class SessionsService {
       attendee_first_names,
       status: sessionRow.status,
       cancelled_at: sessionRow.cancelled_at ?? null,
+      session_type: sessionRow.session_type ?? SessionType.GROUP,
+      private_invitee_user_id: sessionRow.private_invitee_user_id ?? null,
       rough_location:
         sessionRow.rough_location ?? 'Exact location shared after booking',
       arrival_instructions: sessionRow.arrival_instructions ?? null,
@@ -655,6 +807,8 @@ export class SessionsService {
         'session.rough_location AS rough_location',
         'session.status AS status',
         'session.cancelled_at AS cancelled_at',
+        'session.session_type AS session_type',
+        'session.private_invitee_user_id AS private_invitee_user_id',
         'class.title AS title',
         'class.category AS category',
       ])
@@ -695,7 +849,7 @@ export class SessionsService {
       );
     }
 
-    const bookings = await this.bookingsRepository
+    const bookingsQuery = this.bookingsRepository
       .createQueryBuilder('booking')
       .leftJoin('booking.user', 'user')
       .select([
@@ -707,8 +861,18 @@ export class SessionsService {
         'user.first_name AS learner_first_name',
       ])
       .where('booking.session_id = :sessionId', { sessionId })
-      .orderBy('booking.createdAt', 'DESC')
-      .getRawMany();
+      .orderBy('booking.createdAt', 'DESC');
+
+    if (
+      session.session_type === SessionType.PRIVATE &&
+      session.private_invitee_user_id
+    ) {
+      bookingsQuery.andWhere('booking.user_id = :inviteeUserId', {
+        inviteeUserId: session.private_invitee_user_id,
+      });
+    }
+
+    const bookings = await bookingsQuery.getRawMany();
 
     return {
       session: {
@@ -721,6 +885,8 @@ export class SessionsService {
         arrival_instructions: session.arrival_instructions ?? null,
         status: session.status,
         cancelled_at: session.cancelled_at ?? null,
+        session_type: session.session_type ?? SessionType.GROUP,
+        private_invitee_user_id: session.private_invitee_user_id ?? null,
       },
       bookings,
     };
@@ -753,6 +919,9 @@ export class SessionsService {
       ])
       .where('session.start_time > NOW()')
       .andWhere('session.status = :status', { status: SessionStatus.ACTIVE })
+      .andWhere('session.session_type = :sessionType', {
+        sessionType: SessionType.GROUP,
+      })
       .setParameters({ lat, lng });
 
     if (category && category !== 'all') {
