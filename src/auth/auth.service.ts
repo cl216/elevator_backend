@@ -6,7 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource} from 'typeorm';
 import { randomBytes, createHash } from 'crypto';
 import { User } from '../users/user.entity';
 import { JwtService } from '@nestjs/jwt';
@@ -28,7 +28,80 @@ export class AuthService {
     private userRepository: Repository<User>,
     private jwtService: JwtService,
     private mailService: MailService,
+      private dataSource: DataSource,
   ) {}
+
+  async deleteMe(userId: string) {
+  await this.dataSource.transaction(async (manager) => {
+    // Reviews depend on bookings/users.
+    await manager.query(
+      `DELETE FROM reviews WHERE learner_id = $1 OR teacher_id = $1`,
+      [userId],
+    );
+
+    // Bookings depend on users/sessions.
+    await manager.query(
+      `DELETE FROM bookings WHERE user_id = $1 OR cancelled_by_user_id = $1`,
+      [userId],
+    );
+
+    // Notifications are user-owned.
+    await manager.query(
+      `DELETE FROM notifications WHERE user_id = $1`,
+      [userId],
+    );
+
+    // Teacher followers.
+    await manager.query(
+      `DELETE FROM teacher_followers WHERE user_id = $1 OR teacher_id = $1`,
+      [userId],
+    );
+
+    // Private requests where user is learner or teacher.
+    await manager.query(
+      `DELETE FROM private_session_requests WHERE learner_id = $1 OR teacher_id = $1`,
+      [userId],
+    );
+
+    // Sessions taught by user.
+    await manager.query(
+      `DELETE FROM sessions WHERE teacher_id = $1 OR private_invitee_user_id = $1`,
+      [userId],
+    );
+
+    // Teacher profile.
+    await manager.query(
+      `DELETE FROM teacher_profiles WHERE user_id = $1`,
+      [userId],
+    );
+
+    // Finally user.
+    await manager.query(
+      `DELETE FROM users WHERE id = $1`,
+      [userId],
+    );
+  });
+
+  this.logger.log(`AUTH_DELETE_ACCOUNT_SUCCESS userId=${userId}`);
+
+  return { success: true };
+}
+
+async deleteAccount(userId: string) {
+  const user = await this.userRepository.findOne({
+    where: { id: userId },
+  });
+
+  if (!user) {
+    return { success: true };
+  }
+
+  await this.userRepository.remove(user);
+
+  this.logger.log(`AUTH_DELETE_ACCOUNT_SUCCESS userId=${userId}`);
+
+  return { success: true };
+}
 
   private get isProduction() {
     return process.env.NODE_ENV === 'production';

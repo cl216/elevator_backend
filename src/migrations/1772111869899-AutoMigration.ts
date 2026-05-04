@@ -11,11 +11,11 @@ export class AutoMigration1772111869899 implements MigrationInterface {
     `);
 
     // 2) Backfill existing rows using start_time + duration (minutes)
-    await queryRunner.query(`
-      UPDATE "sessions"
-      SET "end_time" = "start_time" + ("duration" || ' minutes')::interval
-      WHERE "end_time" IS NULL
-    `);
+await queryRunner.query(`
+  UPDATE "sessions"
+  SET "end_time" = "start_time" + ("duration_minutes" * interval '1 minute')
+  WHERE "end_time" IS NULL
+`);
 
     // 3) Enforce NOT NULL after backfill
     await queryRunner.query(`

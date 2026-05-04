@@ -51,7 +51,7 @@ export class ClassesService {
       title: dto.title.trim(),
       category: approvedCategory.slug,
       description: dto.description?.trim() || undefined,
-      price: dto.price,
+      priceCents: Math.round(dto.price * 100),
       image_url_1: dto.image_url_1?.trim() || null,
       image_url_2: dto.image_url_2?.trim() || null,
       image_url_3: dto.image_url_3?.trim() || null,
@@ -117,8 +117,7 @@ export class ClassesService {
       if (!Number.isFinite(dto.price) || dto.price <= 0) {
         throw new BadRequestException('Price must be greater than zero');
       }
-      existing.price = dto.price;
-    }
+existing.priceCents = Math.round(dto.price * 100);    }
 
     if (typeof dto.image_url_1 === 'string') {
       existing.image_url_1 = dto.image_url_1.trim() || null;

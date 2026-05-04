@@ -171,18 +171,18 @@ export class SessionsService {
       endTime,
     );
 
-    const classEntity = this.classesRepository.create({
-      teacher: input.teacher,
-      title,
-      category,
-      description,
-      price: input.price,
-      image_url_1: input.image_url_1?.trim() || null,
-      image_url_2: input.image_url_2?.trim() || null,
-      image_url_3: input.image_url_3?.trim() || null,
-    });
+const classEntity = this.classesRepository.create({
+  teacher: input.teacher,
+  title,
+  category,
+  description,
+  priceCents: Math.round(input.price * 100),
+  image_url_1: input.image_url_1?.trim() || null,
+  image_url_2: input.image_url_2?.trim() || null,
+  image_url_3: input.image_url_3?.trim() || null,
+});
 
-    const savedClass = await this.classesRepository.save(classEntity);
+const savedClass = await this.classesRepository.save(classEntity);
 
     const session = this.sessionsRepository.create({
       class: savedClass,
@@ -416,9 +416,9 @@ export class SessionsService {
       session.class.description = dto.description.trim() || null;
     }
 
-    if (typeof dto.price === 'number') {
-      session.class.price = dto.price;
-    }
+if (typeof dto.price === 'number') {
+  session.class.priceCents = Math.round(dto.price * 100);
+}
 
     if (typeof dto.image_url_1 === 'string') {
       session.class.image_url_1 = dto.image_url_1.trim() || null;

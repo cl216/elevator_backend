@@ -54,8 +54,8 @@ export class Booking {
   @Column({ type: 'timestamp', nullable: true })
   expires_at: Date | null;
 
-  @CreateDateColumn()
-  createdAt: Date;
+@CreateDateColumn({ name: "created_at" })
+createdAt: Date;
 
   @Column({ type: 'timestamp', nullable: true })
   confirmed_at: Date | null;

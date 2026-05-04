@@ -6,6 +6,10 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
+import { ServeStaticModule } from "@nestjs/serve-static";
+import { join } from "path";
+import { UploadsModule } from "./uploads/uploads.module";
+
 import { CategoriesModule } from './categories/categories.module';
 import { ClassRequestsModule } from './class-requests/class-requests.module';
 import { UsersModule } from './users/users.module';
@@ -23,6 +27,13 @@ import { PrivateSessionRequestsModule } from './private-lessons/private-lessons.
 
 @Module({
   imports: [
+
+    ServeStaticModule.forRoot({
+  rootPath: join(process.cwd(), "uploads"),
+  serveRoot: "/uploads",
+}),
+UploadsModule,
+
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: Joi.object({

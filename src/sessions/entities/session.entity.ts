@@ -40,7 +40,7 @@ export class Session {
   @Column({ type: 'timestamp' })
   end_time: Date;
 
-  @Column({ type: 'int' })
+@Column({ name: "duration_minutes", type: "int" })
   duration: number;
 
   @Column({ type: 'int' })

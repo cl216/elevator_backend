@@ -36,49 +36,65 @@ export class TeacherService {
     private readonly reviewsService: ReviewsService,
   ) {}
 
-  async createProfile(user: User, dto: CreateTeacherProfileDto) {
-    if (dto.bio && containsBlockedContactOrOffPlatformContent(dto.bio)) {
-      throw new BadRequestException(
-        'Please keep communication on the platform. Do not include phone numbers, email addresses, social handles, or external sites in your bio.',
-      );
-    }
+async createProfile(user: User, dto: CreateTeacherProfileDto) {
+  if (dto.bio && containsBlockedContactOrOffPlatformContent(dto.bio)) {
+    throw new BadRequestException(
+      'Please keep communication on the platform. Do not include phone numbers, email addresses, social handles, or external sites in your bio.',
+    );
+  }
 
-    const existingProfile = await this.profileRepo.findOne({
-      where: {
-        user: { id: user.id },
-      } as any,
-      relations: ['user'],
-    });
+  const existingProfile = await this.profileRepo.findOne({
+    where: {
+      user: { id: user.id },
+    } as any,
+    relations: ['user'],
+  });
 
-    const full_name = dto.full_name.trim();
-    const bio = dto.bio?.trim() || null;
-    const image_url = dto.image_url?.trim() || null;
+  const full_name = dto.full_name.trim();
+  const bio = dto.bio?.trim() || null;
+  const image_url = dto.image_url?.trim() || null;
 
-    if (existingProfile) {
-      existingProfile.full_name = full_name;
-      existingProfile.bio = bio;
-      existingProfile.image_url = image_url;
+  const gallery = Array.isArray(dto.gallery_image_urls)
+    ? dto.gallery_image_urls.map((item) => item?.trim()).filter(Boolean)
+    : [];
 
-      const savedProfile = await this.profileRepo.save(existingProfile);
+  const image_url_1 = dto.image_url_1?.trim() || gallery[0] || null;
+  const image_url_2 = dto.image_url_2?.trim() || gallery[1] || null;
+  const image_url_3 = dto.image_url_3?.trim() || gallery[2] || null;
 
-      await this.userRepo.update({ id: user.id }, { role: 'TEACHER' });
+  if (existingProfile) {
+    existingProfile.full_name = full_name;
+    existingProfile.display_name = full_name;
+    existingProfile.bio = bio;
+    existingProfile.image_url = image_url;
+    existingProfile.image_url_1 = image_url_1;
+    existingProfile.image_url_2 = image_url_2;
+    existingProfile.image_url_3 = image_url_3;
 
-      return savedProfile;
-    }
-
-    const profile = this.profileRepo.create({
-      full_name,
-      bio,
-      image_url,
-      user: { id: user.id } as User,
-    });
-
-    const savedProfile = await this.profileRepo.save(profile);
+    const savedProfile = await this.profileRepo.save(existingProfile);
 
     await this.userRepo.update({ id: user.id }, { role: 'TEACHER' });
 
     return savedProfile;
   }
+
+  const profile = this.profileRepo.create({
+    full_name,
+      display_name: full_name,
+    bio,
+    image_url,
+    image_url_1,
+    image_url_2,
+    image_url_3,
+    user: { id: user.id } as User,
+  });
+
+  const savedProfile = await this.profileRepo.save(profile);
+
+  await this.userRepo.update({ id: user.id }, { role: 'TEACHER' });
+
+  return savedProfile;
+}
 
   async followTeacher(currentUserId: string, teacherId: string) {
     if (currentUserId === teacherId) {
@@ -159,74 +175,58 @@ export class TeacherService {
   }
 
   async getSessionBookingsForTeacher(sessionId: string, teacherId: string) {
-    const teacher = await this.userRepo.findOne({
-      where: { id: teacherId },
-      relations: { teacherProfile: true } as any,
-    });
+  const teacher = await this.userRepo.findOne({
+    where: { id: teacherId },
+    relations: { teacherProfile: true } as any,
+  });
 
-    if (!teacher?.teacherProfile) {
-      throw new ForbiddenException('Teacher profile required');
-    }
-
-    const session = await this.sessionRepo.findOne({
-      where: { id: sessionId },
-      relations: ['teacher'],
-    });
-
-    if (!session) {
-      throw new NotFoundException('Session not found');
-    }
-
-    if (session.teacher.id !== teacherId) {
-      throw new ForbiddenException(
-        'You can only view bookings for your own sessions',
-      );
-    }
-
-    const bookings = await this.bookingRepo
-      .createQueryBuilder('booking')
-      .leftJoinAndSelect('booking.user', 'learner')
-      .leftJoinAndSelect('booking.session', 'session')
-      .where('session.id = :sessionId', { sessionId })
-      .andWhere('booking.status IN (:...statuses)', {
-        statuses: ['PENDING', 'CONFIRMED'],
-      })
-      .orderBy('booking.createdAt', 'DESC')
-      .getMany();
-
-    const learnerIds = [...new Set(bookings.map((b) => b.user.id))];
-
-    let completedCounts = new Map<string, number>();
-
-    if (learnerIds.length > 0) {
-      const rawCounts = await this.bookingRepo
-        .createQueryBuilder('booking')
-        .leftJoin('booking.user', 'learner')
-        .select('learner.id', 'learnerId')
-        .addSelect('COUNT(booking.id)', 'completedCount')
-        .where('learner.id IN (:...learnerIds)', { learnerIds })
-        .andWhere('booking.status = :status', { status: 'CONFIRMED' })
-        .groupBy('learner.id')
-        .getRawMany();
-
-      completedCounts = new Map(
-        rawCounts.map((row) => [row.learnerId, Number(row.completedCount)]),
-      );
-    }
-
-    return bookings.map((booking) => ({
-      bookingId: booking.id,
-      status: booking.status,
-      introMessage: booking.intro_message ?? null,
-      createdAt: booking.createdAt,
-      learner: {
-        id: booking.user.id,
-        firstName: booking.user.first_name ?? 'Learner',
-        memberSince: booking.user.created_at,
-        completedBookingsCount: completedCounts.get(booking.user.id) ?? 0,
-      },
-    }));
+  if (!teacher?.teacherProfile) {
+    throw new ForbiddenException('Teacher profile required');
   }
+
+  const session = await this.sessionRepo.findOne({
+    where: { id: sessionId },
+    relations: ['teacher', 'class'],
+  });
+
+  if (!session) {
+    throw new NotFoundException('Session not found');
+  }
+
+  if (session.teacher.id !== teacherId) {
+    throw new ForbiddenException(
+      'You can only view bookings for your own sessions',
+    );
+  }
+
+  const bookings = await this.bookingRepo
+    .createQueryBuilder('booking')
+    .leftJoin('booking.user', 'learner')
+    .select([
+      'booking.id AS id',
+      'booking.status AS status',
+      'booking.intro_message AS intro_message',
+      'booking.createdAt AS created_at',
+      'learner.id AS learner_id',
+      'learner.first_name AS learner_first_name',
+    ])
+    .where('booking.session_id = :sessionId', { sessionId })
+    .orderBy('booking.createdAt', 'DESC')
+    .getRawMany();
+
+  return {
+    session: {
+      id: session.id,
+      title: session.class?.title ?? 'Session',
+      start_time: session.start_time,
+      duration: session.duration,
+      max_participants: session.max_participants,
+      price: Number(session.price),
+      arrival_instructions: session.arrival_instructions ?? null,
+    },
+    bookings,
+  };
+}
 
   async getPublicTeacherProfile(teacherId: string) {
     const teacher = await this.userRepo.findOne({
@@ -241,15 +241,20 @@ export class TeacherService {
     const reviewSummary =
       await this.reviewsService.getReviewSummaryForTeacher(teacherId);
 
-    return {
-      id: teacher.id,
-      full_name: teacher.teacherProfile.full_name,
-      bio: teacher.teacherProfile.bio ?? null,
-      image_url: teacher.teacherProfile.image_url ?? null,
-      joined_at: teacher.created_at,
-      average_rating: reviewSummary.average_rating,
-      review_count: reviewSummary.review_count,
-    };
+return {
+  id: teacher.id,
+  full_name: teacher.teacherProfile.full_name,
+  bio: teacher.teacherProfile.bio ?? null,
+  image_url: teacher.teacherProfile.image_url ?? null,
+  image_urls: [
+    teacher.teacherProfile.image_url_1,
+    teacher.teacherProfile.image_url_2,
+    teacher.teacherProfile.image_url_3,
+  ].filter(Boolean),
+  joined_at: teacher.created_at,
+  average_rating: reviewSummary.average_rating,
+  review_count: reviewSummary.review_count,
+};
   }
 
   async getMyProfile(userId: string) {
@@ -264,11 +269,19 @@ export class TeacherService {
       return null;
     }
 
-    return {
-      id: profile.id,
-      full_name: profile.full_name,
-      bio: profile.bio,
-      image_url: profile.image_url,
-    };
+return {
+  id: profile.id,
+  full_name: profile.full_name,
+  bio: profile.bio,
+  image_url: profile.image_url,
+  image_urls: [
+    profile.image_url_1,
+    profile.image_url_2,
+    profile.image_url_3,
+  ].filter(Boolean),
+  image_url_1: profile.image_url_1,
+  image_url_2: profile.image_url_2,
+  image_url_3: profile.image_url_3,
+};
   }
 }

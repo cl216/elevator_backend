@@ -1,5 +1,4 @@
-import { IsString, IsOptional, MaxLength, IsUrl } from 'class-validator';
-
+import { IsArray, IsOptional, IsString, IsUrl, MaxLength } from "class-validator";
 export class CreateTeacherProfileDto {
   @IsString()
   @MaxLength(120)
@@ -10,7 +9,24 @@ export class CreateTeacherProfileDto {
   @MaxLength(1000)
   bio?: string;
 
-  @IsOptional()
-  @IsUrl()
+@IsOptional()
+  @IsString()
   image_url?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  gallery_image_urls?: string[];
+
+  @IsOptional()
+  @IsString()
+  image_url_1?: string;
+
+  @IsOptional()
+  @IsString()
+  image_url_2?: string;
+
+  @IsOptional()
+  @IsString()
+  image_url_3?: string;
 }

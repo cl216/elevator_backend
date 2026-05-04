@@ -24,4 +24,16 @@ export class TeacherProfile {
 
   @Column({ default: false })
   stripe_enabled: boolean;
+
+  @Column({ type: "text", nullable: true })
+image_url_1: string | null;
+
+@Column({ type: "text", nullable: true })
+image_url_2: string | null;
+
+@Column({ type: "text", nullable: true })
+image_url_3: string | null;
+
+@Column({ type: "text" })
+display_name: string;
 }

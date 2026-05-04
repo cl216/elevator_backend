@@ -1,26 +1,27 @@
 import {
-  Controller,
-  Post,
-  Get,
-  Delete,
-  Param,
   Body,
-    Req,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
   Query,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { TeacherService } from './teacher.service';
 import type { Response } from 'express';
-import { CreateTeacherProfileDto } from './dto/create-teacher-profile.dto';
-import { JwtAuthGuard } from '../auth/jwt.guard';
+
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../auth/jwt.guard';
+import { CreateTeacherProfileDto } from './dto/create-teacher-profile.dto';
 import { TeacherStripeService } from './teacher-stripe.service';
+import { TeacherService } from './teacher.service';
 
 @Controller('teacher')
 export class TeacherController {
   constructor(
-    private teacherService: TeacherService,
+    private readonly teacherService: TeacherService,
     private readonly teacherStripeService: TeacherStripeService,
   ) {}
 
@@ -40,6 +41,41 @@ export class TeacherController {
   @UseGuards(JwtAuthGuard)
   async stripeStatus(@CurrentUser() user: { id: string }) {
     return this.teacherStripeService.refreshStripeStatus(user.id);
+  }
+
+  @Get('stripe/can-create-sessions')
+  @UseGuards(JwtAuthGuard)
+  async canCreateSessions(@CurrentUser() user: { id: string }) {
+    const status =
+      await this.teacherStripeService.assertTeacherCanCreateSessions(user.id);
+
+    return {
+      can_create_sessions: true,
+      ...status,
+    };
+  }
+
+  @Get('stripe/refresh')
+  async stripeRefresh(
+    @Query('account') accountId: string,
+    @Res() res: Response,
+  ) {
+    const url =
+      await this.teacherStripeService.createRefreshOnboardingLink(accountId);
+
+    return res.redirect(url);
+  }
+
+  @Get('stripe/return')
+  async stripeReturn(@Res() res: Response) {
+    return res.send(`
+      <html>
+        <body style="font-family: sans-serif; padding: 24px;">
+          <h2>Stripe onboarding complete</h2>
+          <p>You can return to the Elevator app now.</p>
+        </body>
+      </html>
+    `);
   }
 
   @Post(':id/follow')
@@ -94,27 +130,4 @@ export class TeacherController {
   async getPublicTeacherProfile(@Param('id') teacherId: string) {
     return this.teacherService.getPublicTeacherProfile(teacherId);
   }
-
-@Get('stripe/refresh')
-async stripeRefresh(
-  @Query('account') accountId: string,
-  @Res() res: Response,
-) {
-  const url =
-    await this.teacherStripeService.createRefreshOnboardingLink(accountId);
-
-  return res.redirect(url);
-}
-
-@Get('stripe/return')
-async stripeReturn(@Res() res: Response) {
-  return res.send(`
-    <html>
-      <body style="font-family: sans-serif; padding: 24px;">
-        <h2>Stripe onboarding complete</h2>
-        <p>You can return to the Elevator app now.</p>
-      </body>
-    </html>
-  `);
-}
 }

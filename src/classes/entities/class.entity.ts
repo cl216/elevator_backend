@@ -25,8 +25,8 @@ export class Class {
 @Column({ type: 'text', nullable: true })
 description: string | null;
 
-  @Column({ type: 'decimal' })
-  price: number;
+@Column({ name: "price_cents", type: "integer" })
+priceCents: number;
 
   @Column({ type: 'text', nullable: true })
   image_url_1: string | null;

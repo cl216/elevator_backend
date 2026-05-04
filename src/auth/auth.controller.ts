@@ -5,6 +5,7 @@ import {
   Get,
   UseGuards,
   Query,
+  Delete
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -19,13 +20,14 @@ import { CurrentUser } from './decorators/current-user.decorator';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService) { }
 
   @Post('register')
   @Throttle({ short: { limit: 5, ttl: 60_000 } })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
+
 
   @Post('login')
   @Throttle({ short: { limit: 5, ttl: 60_000 } })
@@ -80,4 +82,16 @@ export class AuthController {
   me(@CurrentUser() user: { id: string }) {
     return this.authService.getMe(user.id);
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('me')
+  deleteMe(@CurrentUser() user: { id: string }) {
+    return this.authService.deleteMe(user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+@Post('delete-account')
+deleteAccount(@CurrentUser() user: { id: string }) {
+  return this.authService.deleteAccount(user.id);
+}
 }

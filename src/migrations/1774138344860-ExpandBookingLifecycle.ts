@@ -1,9 +1,14 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
 export class ExpandBookingLifecycle1774138344860 implements MigrationInterface {
-
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // 1) Rename existing enum if it exists
+    // 1) Drop old text CHECK constraint if present
+    await queryRunner.query(`
+      ALTER TABLE "bookings"
+      DROP CONSTRAINT IF EXISTS "bookings_status_check"
+    `);
+
+    // 2) Rename existing enum if it exists
     await queryRunner.query(`
       DO $$
       BEGIN
@@ -17,7 +22,7 @@ export class ExpandBookingLifecycle1774138344860 implements MigrationInterface {
       END$$;
     `);
 
-    // 2) Create new enum
+    // 3) Create new enum
     await queryRunner.query(`
       DO $$
       BEGIN
@@ -38,7 +43,7 @@ export class ExpandBookingLifecycle1774138344860 implements MigrationInterface {
       END$$;
     `);
 
-    // 3) Convert existing status column to text first
+    // 4) Convert existing status column to text first
     await queryRunner.query(`
       ALTER TABLE "bookings"
       ALTER COLUMN "status" DROP DEFAULT
@@ -46,44 +51,37 @@ export class ExpandBookingLifecycle1774138344860 implements MigrationInterface {
 
     await queryRunner.query(`
       ALTER TABLE "bookings"
-      ALTER COLUMN "status" TYPE text
+      ALTER COLUMN "status"
+      TYPE text
+      USING "status"::text
     `);
 
-    // 4) Backfill old CANCELLED -> CANCELLED_BY_LEARNER
+    // 5) Backfill old CANCELLED -> CANCELLED_BY_LEARNER
     await queryRunner.query(`
       UPDATE "bookings"
       SET "status" = 'CANCELLED_BY_LEARNER'
-      WHERE "status" = 'CANCELLED'
+      WHERE "status"::text = 'CANCELLED'
     `);
 
-    // 5) Convert status column to new enum
+    // 6) Convert status column to new enum
     await queryRunner.query(`
       ALTER TABLE "bookings"
       ALTER COLUMN "status"
       TYPE "bookings_status_enum"
-      USING "status"::"bookings_status_enum"
+      USING "status"::text::"bookings_status_enum"
     `);
 
     await queryRunner.query(`
       ALTER TABLE "bookings"
-      ALTER COLUMN "status" SET DEFAULT 'PENDING'
+      ALTER COLUMN "status" SET DEFAULT 'PENDING'::"bookings_status_enum"
     `);
 
-    // 6) Drop old enum if present
+    // 7) Drop old enum if present
     await queryRunner.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (
-          SELECT 1
-          FROM pg_type
-          WHERE typname = 'bookings_status_enum_old'
-        ) THEN
-          DROP TYPE "bookings_status_enum_old";
-        END IF;
-      END$$;
+      DROP TYPE IF EXISTS "bookings_status_enum_old"
     `);
 
-    // 7) Add lifecycle columns
+    // 8) Add lifecycle columns
     await queryRunner.query(`
       ALTER TABLE "bookings"
       ADD COLUMN IF NOT EXISTS "confirmed_at" TIMESTAMP NULL,
@@ -94,7 +92,7 @@ export class ExpandBookingLifecycle1774138344860 implements MigrationInterface {
       ADD COLUMN IF NOT EXISTS "stripe_refund_id" text NULL
     `);
 
-    // 8) Optional FK for cancelled_by_user_id
+    // 9) Optional FK for cancelled_by_user_id
     await queryRunner.query(`
       DO $$
       BEGIN
@@ -130,24 +128,6 @@ export class ExpandBookingLifecycle1774138344860 implements MigrationInterface {
       DROP COLUMN IF EXISTS "stripe_refund_id"
     `);
 
-    // Recreate old enum
-    await queryRunner.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1
-          FROM pg_type
-          WHERE typname = 'bookings_status_enum_old'
-        ) THEN
-          CREATE TYPE "bookings_status_enum_old" AS ENUM (
-            'PENDING',
-            'CONFIRMED',
-            'CANCELLED'
-          );
-        END IF;
-      END$$;
-    `);
-
     await queryRunner.query(`
       ALTER TABLE "bookings"
       ALTER COLUMN "status" DROP DEFAULT
@@ -155,7 +135,9 @@ export class ExpandBookingLifecycle1774138344860 implements MigrationInterface {
 
     await queryRunner.query(`
       ALTER TABLE "bookings"
-      ALTER COLUMN "status" TYPE text
+      ALTER COLUMN "status"
+      TYPE text
+      USING "status"::text
     `);
 
     await queryRunner.query(`
@@ -170,15 +152,27 @@ export class ExpandBookingLifecycle1774138344860 implements MigrationInterface {
     `);
 
     await queryRunner.query(`
-      ALTER TABLE "bookings"
-      ALTER COLUMN "status"
-      TYPE "bookings_status_enum_old"
-      USING "status"::"bookings_status_enum_old"
+      DROP TYPE IF EXISTS "bookings_status_enum_old"
+    `);
+
+    await queryRunner.query(`
+      CREATE TYPE "bookings_status_enum_old" AS ENUM (
+        'PENDING',
+        'CONFIRMED',
+        'CANCELLED'
+      )
     `);
 
     await queryRunner.query(`
       ALTER TABLE "bookings"
-      ALTER COLUMN "status" SET DEFAULT 'PENDING'
+      ALTER COLUMN "status"
+      TYPE "bookings_status_enum_old"
+      USING "status"::text::"bookings_status_enum_old"
+    `);
+
+    await queryRunner.query(`
+      ALTER TABLE "bookings"
+      ALTER COLUMN "status" SET DEFAULT 'PENDING'::"bookings_status_enum_old"
     `);
 
     await queryRunner.query(`
@@ -189,5 +183,4 @@ export class ExpandBookingLifecycle1774138344860 implements MigrationInterface {
       ALTER TYPE "bookings_status_enum_old" RENAME TO "bookings_status_enum"
     `);
   }
-
 }

@@ -22,78 +22,71 @@ export class TeacherStripeService {
     private readonly tpRepo: Repository<TeacherProfile>,
   ) {}
 
-  /**
-   * Creates (if missing) an Express connected account for this teacher (Ireland),
-   * then returns a fresh Stripe onboarding link URL.
-   */
   async createOrResumeOnboarding(teacherId: string) {
-  const user = await this.userRepo.findOne({
-    where: { id: teacherId },
-    relations: { teacherProfile: true } as any,
-  });
-
-  if (!user) throw new BadRequestException('User not found');
-  if (!user.teacherProfile) {
-    throw new ForbiddenException('Teacher profile required');
-  }
-
-  const profile = user.teacherProfile;
-
-  if (!profile.stripe_account_id) {
-    const account = await this.stripe.accounts.create({
-      type: 'express',
-      country: 'IE',
-      email: user.email,
-      capabilities: {
-        transfers: { requested: true },
-        card_payments: { requested: true },
-      },
+    const user = await this.userRepo.findOne({
+      where: { id: teacherId },
+      relations: { teacherProfile: true } as any,
     });
 
-    profile.stripe_account_id = account.id;
-    profile.stripe_enabled = false;
-    await this.tpRepo.save(profile);
+    if (!user) throw new BadRequestException('User not found');
+    if (!user.teacherProfile) {
+      throw new ForbiddenException('Teacher profile required');
+    }
+
+    const profile = user.teacherProfile;
+
+    if (!profile.stripe_account_id) {
+      const account = await this.stripe.accounts.create({
+        type: 'express',
+        country: 'IE',
+        email: user.email,
+        capabilities: {
+          transfers: { requested: true },
+          card_payments: { requested: true },
+        },
+      });
+
+      profile.stripe_account_id = account.id;
+      profile.stripe_enabled = false;
+      await this.tpRepo.save(profile);
+    }
+
+    const link = await this.createAccountOnboardingLink(profile.stripe_account_id);
+
+    console.log('STRIPE_ONBOARD_URL', link.url);
+    return { url: link.url };
   }
 
-  const link = await this.createAccountOnboardingLink(profile.stripe_account_id);
+  async createRefreshOnboardingLink(accountId: string) {
+    if (!accountId) {
+      throw new BadRequestException('Missing account id');
+    }
 
-  console.log('STRIPE_ONBOARD_URL', link.url);
-  return { url: link.url };
-}
-
-async createRefreshOnboardingLink(accountId: string) {
-  if (!accountId) {
-    throw new BadRequestException('Missing account id');
+    const link = await this.createAccountOnboardingLink(accountId);
+    return link.url;
   }
 
-  const link = await this.createAccountOnboardingLink(accountId);
-  return link.url;
-}
+  private async createAccountOnboardingLink(accountId: string) {
+    const refreshUrlBase = process.env.STRIPE_CONNECT_REFRESH_URL;
+    const returnUrl = process.env.STRIPE_CONNECT_RETURN_URL;
 
-private async createAccountOnboardingLink(accountId: string) {
-  const refreshUrlBase = process.env.STRIPE_CONNECT_REFRESH_URL;
-  const returnUrl = process.env.STRIPE_CONNECT_RETURN_URL;
+    if (!refreshUrlBase || !returnUrl) {
+      throw new BadRequestException(
+        'Missing STRIPE_CONNECT_REFRESH_URL or STRIPE_CONNECT_RETURN_URL',
+      );
+    }
 
-  if (!refreshUrlBase || !returnUrl) {
-    throw new BadRequestException(
-      'Missing STRIPE_CONNECT_REFRESH_URL or STRIPE_CONNECT_RETURN_URL',
-    );
+    const separator = refreshUrlBase.includes('?') ? '&' : '?';
+    const refreshUrl = `${refreshUrlBase}${separator}account=${encodeURIComponent(accountId)}`;
+
+    return this.stripe.accountLinks.create({
+      account: accountId,
+      refresh_url: refreshUrl,
+      return_url: returnUrl,
+      type: 'account_onboarding',
+    });
   }
 
-  const separator = refreshUrlBase.includes('?') ? '&' : '?';
-  const refreshUrl = `${refreshUrlBase}${separator}account=${encodeURIComponent(accountId)}`;
-
-  return this.stripe.accountLinks.create({
-    account: accountId,
-    refresh_url: refreshUrl,
-    return_url: returnUrl,
-    type: 'account_onboarding',
-  });
-}
-
-  /**
-   * Checks Stripe connected account capability status and updates stripe_enabled.
-   */
   async refreshStripeStatus(teacherId: string) {
     const user = await this.userRepo.findOne({
       where: { id: teacherId },
@@ -108,11 +101,15 @@ private async createAccountOnboardingLink(accountId: string) {
     const profile = user.teacherProfile;
 
     if (!profile.stripe_account_id) {
+      profile.stripe_enabled = false;
+      await this.tpRepo.save(profile);
+
       return {
         stripe_enabled: false,
         stripe_account_id: null,
         charges_enabled: false,
         payouts_enabled: false,
+        details_submitted: false,
       };
     }
 
@@ -120,18 +117,35 @@ private async createAccountOnboardingLink(accountId: string) {
 
     const chargesEnabled = !!acct.charges_enabled;
     const payoutsEnabled = !!acct.payouts_enabled;
+    const detailsSubmitted = !!acct.details_submitted;
+
     const enabled = chargesEnabled && payoutsEnabled;
 
-    if (enabled !== profile.stripe_enabled) {
-      profile.stripe_enabled = enabled;
-      await this.tpRepo.save(profile);
-    }
+    profile.stripe_enabled = enabled;
+    await this.tpRepo.save(profile);
 
     return {
       stripe_enabled: enabled,
       stripe_account_id: profile.stripe_account_id,
       charges_enabled: chargesEnabled,
       payouts_enabled: payoutsEnabled,
+      details_submitted: detailsSubmitted,
     };
+  }
+
+  async assertTeacherCanCreateSessions(teacherId: string) {
+    const status = await this.refreshStripeStatus(teacherId);
+
+    if (
+      !status.stripe_enabled ||
+      !status.charges_enabled ||
+      !status.payouts_enabled
+    ) {
+      throw new ForbiddenException(
+        'Complete payouts setup first before creating sessions.',
+      );
+    }
+
+    return status;
   }
 }
