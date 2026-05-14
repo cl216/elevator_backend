@@ -7,19 +7,25 @@ import { SendEmailOptions } from './email.types';
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-  private readonly resend: Resend;
+  private readonly resend: Resend | null;
   private readonly enabled: boolean;
 
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('RESEND_API_KEY');
-    this.enabled = !!apiKey;
-    this.resend = new Resend(apiKey);
+
+    this.enabled =
+      this.configService.get<string>('EMAIL_NOTIFICATIONS_ENABLED') === 'true' &&
+      !!apiKey;
+
+    this.resend = apiKey ? new Resend(apiKey) : null;
   }
 
   async send(options: SendEmailOptions): Promise<void> {
-    if (!this.enabled) {
-      this.logger.warn(
-        `Email disabled. Would have sent "${options.subject}" to ${[].concat(options.to as any).join(', ')}`
+    if (!this.enabled || !this.resend) {
+      this.logger.log(
+        `Email notifications disabled. Skipped "${options.subject}" to ${[]
+          .concat(options.to as any)
+          .join(', ')}`,
       );
       return;
     }
