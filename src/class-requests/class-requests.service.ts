@@ -26,17 +26,22 @@ export class ClassRequestsService {
       throw new BadRequestException('User not found');
     }
 
-    const existingRecentRequest = await this.classRequestsRepository
-      .createQueryBuilder('cr')
-      .where('cr.user_id = :userId', { userId })
-      .andWhere(`cr.created_at >= NOW() - INTERVAL '30 days'`)
-      .getOne();
+if (dto.request_type === 'new_class') {
+  const existingRecentNewClassRequest = await this.classRequestsRepository
+    .createQueryBuilder('cr')
+    .where('cr.user_id = :userId', { userId })
+    .andWhere('cr.request_type = :requestType', {
+      requestType: 'new_class',
+    })
+    .andWhere(`cr.created_at >= NOW() - INTERVAL '7 days'`)
+    .getOne();
 
-    if (existingRecentRequest) {
-      throw new BadRequestException(
-        'You can only submit one class request every 30 days.',
-      );
-    }
+  if (existingRecentNewClassRequest) {
+    throw new BadRequestException(
+      'You can only suggest one new class every week.',
+    );
+  }
+}
 
     const note = dto.note?.trim() || null;
     const customTitle = dto.custom_title?.trim() || null;

@@ -27,6 +27,9 @@ export class User {
   first_name: string | null;
 
   @Column({ type: 'text', nullable: true })
+image_url: string | null;
+
+  @Column({ type: 'text', nullable: true })
   stripe_customer_id: string | null;
 
   @Column({ type: 'text', nullable: true })
@@ -53,6 +56,10 @@ export class User {
   @CreateDateColumn()
   created_at: Date;
 
+  
   @OneToOne(() => TeacherProfile, (tp) => tp.user, { nullable: true })
   teacherProfile?: TeacherProfile;
+
+  @Column({ type: 'boolean', default: false })
+is_admin: boolean;
 }

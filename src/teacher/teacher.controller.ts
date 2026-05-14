@@ -31,6 +31,12 @@ export class TeacherController {
     return this.teacherService.createProfile(req.user, dto);
   }
 
+  @Get('attention-summary')
+  @UseGuards(JwtAuthGuard)
+  async getTeacherAttentionSummary(@CurrentUser() user: { id: string }) {
+    return this.teacherService.getTeacherAttentionSummary(user.id);
+  }
+
   @Post('stripe/onboard')
   @UseGuards(JwtAuthGuard)
   async stripeOnboard(@CurrentUser() user: { id: string }) {

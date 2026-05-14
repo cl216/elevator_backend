@@ -45,7 +45,7 @@ export class UploadsController {
     const baseUrl = process.env.API_PUBLIC_URL || "http://localhost:3000";
 
     return {
-      url: `${baseUrl}/uploads/${file.filename}`,
+      url: `/uploads/${file.filename}`,
     };
   }
 }

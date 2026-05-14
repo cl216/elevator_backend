@@ -17,6 +17,7 @@ import { EmailService } from '../email/email.service';
 import { BookingEmailBuilder } from '../email/builders/booking-email.builder';
 import { PaymentsService } from '../payments/payments.service';
 import { PushNotificationsService } from '../notifications/push-notifications.service';
+import { User } from '../users/user.entity';
 
 type BookingWithRelations = Booking & {
   user: any;
@@ -36,195 +37,242 @@ export class BookingsService {
     private readonly pushNotificationsService: PushNotificationsService,
   ) {}
 
-  async createBooking(
-    userId: string,
-    sessionId: string,
-    introMessage?: string,
+async createBooking(
+  userId: string,
+  sessionId: string,
+  introMessage?: string,
+) {
+  this.logger.log(
+    `BOOKING_CREATE_ATTEMPT userId=${userId} sessionId=${sessionId}`,
+  );
+
+  if (!sessionId) {
+    this.logger.warn(`BOOKING_CREATE_MISSING_SESSION_ID userId=${userId}`);
+    throw new BadRequestException("sessionId is required");
+  }
+
+  if (
+    introMessage &&
+    containsBlockedContactOrOffPlatformContent(introMessage)
   ) {
-    this.logger.log(
-      `BOOKING_CREATE_ATTEMPT userId=${userId} sessionId=${sessionId}`,
+    throw new BadRequestException(
+      "Please keep communication on the platform. Do not include phone numbers, email addresses, social handles, or external sites in your message.",
+    );
+  }
+
+  return this.dataSource.transaction(async (manager) => {
+    const session = await manager
+      .getRepository(Session)
+      .createQueryBuilder("session")
+      .where("session.id = :sessionId", { sessionId })
+      .setLock("pessimistic_write")
+      .getOne();
+
+    if (!session) {
+      throw new NotFoundException("Session not found");
+    }
+
+    const sessionWithTeacher = await manager.getRepository(Session).findOne({
+      where: { id: sessionId },
+      relations: {
+        teacher: true,
+        class: true,
+      } as any,
+    });
+
+    if (!sessionWithTeacher) {
+      throw new NotFoundException("Session not found");
+    }
+
+    if (sessionWithTeacher.teacher?.id === userId) {
+      throw new BadRequestException("You cannot book your own session");
+    }
+
+    const learner = await manager.getRepository(User).findOne({
+      where: { id: userId },
+    });
+
+    if (!learner?.image_url?.trim()) {
+      throw new BadRequestException(
+        "Please add a profile photo before booking so the teacher can recognize you.",
+      );
+    }
+
+    if (sessionWithTeacher.session_type === SessionType.PRIVATE) {
+      if (!sessionWithTeacher.private_invitee_user_id) {
+        throw new ForbiddenException(
+          "This private session is not available for booking.",
+        );
+      }
+
+      if (sessionWithTeacher.private_invitee_user_id !== userId) {
+        throw new ForbiddenException(
+          "This private session is only available to the invited learner.",
+        );
+      }
+    }
+
+    if (session.start_time <= new Date()) {
+      throw new BadRequestException("Session already started or is in the past");
+    }
+
+    const bookingRepo = manager.getRepository(Booking);
+
+function resetBookingForFreshCheckout(booking: Booking) {
+  booking.status = BookingStatus.PENDING;
+  booking.expires_at = new Date(Date.now() + 15 * 60 * 1000);
+  booking.intro_message = introMessage?.trim() || null;
+
+  booking.cancelled_at = null;
+  booking.cancelled_by_user_id = null;
+  booking.confirmed_at = null;
+  booking.paid_at = null;
+
+  booking.refunded_at = null;
+  booking.refund_amount = null;
+  booking.refund_failure_reason = null;
+  booking.refund_next_retry_at = null;
+  booking.refund_last_retry_at = null;
+  booking.refund_retry_count = 0;
+  booking.stripe_refund_id = null;
+
+  booking.stripe_checkout_session_id = null;
+  booking.checkout_created_at = null;
+  booking.stripe_payment_intent_id = null;
+  booking.amount = null;
+  booking.currency = null;
+
+  return booking;
+}
+
+    const existingBooking = await bookingRepo
+      .createQueryBuilder("b")
+      .innerJoin("b.user", "u")
+      .innerJoin("b.session", "s")
+      .where("u.id = :userId", { userId })
+      .andWhere("s.id = :sessionId", { sessionId })
+      .orderBy("b.createdAt", "DESC")
+      .getOne();
+
+    if (existingBooking) {
+      this.logger.warn(
+        `BOOKING_CREATE_EXISTING_BOOKING userId=${userId} sessionId=${sessionId} existingBookingId=${existingBooking.id} status=${existingBooking.status}`,
+      );
+
+      if (existingBooking.status === BookingStatus.PENDING) {
+        const expiresAt =
+          existingBooking.expires_at instanceof Date
+            ? existingBooking.expires_at
+            : existingBooking.createdAt
+              ? new Date(existingBooking.createdAt.getTime() + 15 * 60 * 1000)
+              : null;
+
+        const isExpired = !!expiresAt && expiresAt.getTime() <= Date.now();
+        const hasOldCheckout = !!(existingBooking as any).stripe_checkout_session_id;
+
+        if (!isExpired && !hasOldCheckout) {
+          throw new ConflictException({
+            code: "BOOKING_PAYMENT_PENDING",
+            message:
+              "You already started booking this session. Complete payment to confirm it.",
+            bookingId: existingBooking.id,
+          });
+        }
+
+        resetBookingForFreshCheckout(existingBooking);
+
+        const savedExisting = await bookingRepo.save(existingBooking);
+
+        this.logger.log(
+          `BOOKING_CREATE_RESET_PENDING_BOOKING bookingId=${savedExisting.id} userId=${userId} sessionId=${sessionId}`,
+        );
+
+        return savedExisting;
+      }
+
+      if (
+        existingBooking.status === BookingStatus.EXPIRED ||
+        existingBooking.status === BookingStatus.CANCELLED_BY_LEARNER ||
+        existingBooking.status === BookingStatus.REFUND_PENDING ||
+        existingBooking.status === BookingStatus.REFUNDED ||
+        existingBooking.status === BookingStatus.REFUND_FAILED
+      ) {
+        resetBookingForFreshCheckout(existingBooking);
+
+        const savedExisting = await bookingRepo.save(existingBooking);
+
+        this.logger.log(
+          `BOOKING_CREATE_REUSED_OLD_BOOKING bookingId=${savedExisting.id} userId=${userId} sessionId=${sessionId}`,
+        );
+
+        return savedExisting;
+      }
+
+      throw new ConflictException({
+        code: "BOOKING_ALREADY_EXISTS",
+        message: this.getDuplicateBookingMessage(existingBooking.status),
+      });
+    }
+
+    const activeCount = await bookingRepo
+      .createQueryBuilder("b")
+      .innerJoin("b.session", "s")
+      .where("s.id = :sessionId", { sessionId })
+      .andWhere(
+        `(b.status = :confirmedStatus OR (b.status = :pendingStatus AND b.expires_at > NOW()))`,
+        {
+          confirmedStatus: BookingStatus.CONFIRMED,
+          pendingStatus: BookingStatus.PENDING,
+        },
+      )
+      .getCount();
+
+    if (activeCount >= session.max_participants) {
+      throw new ConflictException("Session is fully booked");
+    }
+
+    const booking = bookingRepo.create({
+      user: { id: userId } as any,
+      session: { id: sessionId } as any,
+      status: BookingStatus.PENDING,
+      intro_message: introMessage?.trim() || null,
+      expires_at: new Date(Date.now() + 15 * 60 * 1000),
+    });
+
+    let savedBooking: Booking;
+
+    try {
+      savedBooking = await bookingRepo.save(booking);
+    } catch (error: any) {
+      if (this.isUniqueConstraintViolation(error)) {
+        throw new ConflictException({
+          code: "BOOKING_ALREADY_EXISTS",
+          message: "You already have a booking record for this session.",
+        });
+      }
+
+      throw error;
+    }
+
+    await manager.getRepository(Notification).save(
+      manager.getRepository(Notification).create({
+        user_id: sessionWithTeacher.teacher.id,
+        type: "new_booking_started",
+        title: "New booking started",
+        body: `A learner started booking ${
+          sessionWithTeacher.class?.title ?? "your session"
+        }. Payment is still pending.`,
+        payload: {
+          booking_id: savedBooking.id,
+          session_id: sessionWithTeacher.id,
+          class_title: sessionWithTeacher.class?.title ?? null,
+        },
+      }),
     );
 
-    if (!sessionId) {
-      this.logger.warn(`BOOKING_CREATE_MISSING_SESSION_ID userId=${userId}`);
-      throw new BadRequestException('sessionId is required');
-    }
-
-    if (
-      introMessage &&
-      containsBlockedContactOrOffPlatformContent(introMessage)
-    ) {
-      this.logger.warn(
-        `BOOKING_CREATE_BLOCKED_CONTENT userId=${userId} sessionId=${sessionId}`,
-      );
-      throw new BadRequestException(
-        'Please keep communication on the platform. Do not include phone numbers, email addresses, social handles, or external sites in your message.',
-      );
-    }
-
-    return this.dataSource.transaction(async (manager) => {
-      const session = await manager
-        .getRepository(Session)
-        .createQueryBuilder('session')
-        .where('session.id = :sessionId', { sessionId })
-        .setLock('pessimistic_write')
-        .getOne();
-
-      if (!session) {
-        this.logger.warn(
-          `BOOKING_CREATE_SESSION_NOT_FOUND userId=${userId} sessionId=${sessionId}`,
-        );
-        throw new NotFoundException('Session not found');
-      }
-
-      const sessionWithTeacher = await manager.getRepository(Session).findOne({
-        where: { id: sessionId },
-        relations: {
-          teacher: true,
-          class: true,
-        } as any,
-      });
-
-      if (!sessionWithTeacher) {
-        this.logger.warn(
-          `BOOKING_CREATE_SESSION_NOT_FOUND_AFTER_LOCK userId=${userId} sessionId=${sessionId}`,
-        );
-        throw new NotFoundException('Session not found');
-      }
-
-      if (sessionWithTeacher.teacher?.id === userId) {
-        this.logger.warn(
-          `BOOKING_CREATE_SELF_BOOKING_BLOCKED userId=${userId} sessionId=${sessionId}`,
-        );
-        throw new BadRequestException('You cannot book your own session');
-      }
-
-      if (sessionWithTeacher.session_type === SessionType.PRIVATE) {
-        if (!sessionWithTeacher.private_invitee_user_id) {
-          this.logger.warn(
-            `BOOKING_CREATE_PRIVATE_SESSION_NO_INVITEE userId=${userId} sessionId=${sessionId}`,
-          );
-          throw new ForbiddenException(
-            'This private session is not available for booking.',
-          );
-        }
-
-        if (sessionWithTeacher.private_invitee_user_id !== userId) {
-          this.logger.warn(
-            `BOOKING_CREATE_PRIVATE_SESSION_FORBIDDEN userId=${userId} sessionId=${sessionId} inviteeUserId=${sessionWithTeacher.private_invitee_user_id}`,
-          );
-          throw new ForbiddenException(
-            'This private session is only available to the invited learner.',
-          );
-        }
-      }
-
-      const now = new Date();
-      if (session.start_time <= now) {
-        this.logger.warn(
-          `BOOKING_CREATE_PAST_SESSION userId=${userId} sessionId=${sessionId}`,
-        );
-        throw new BadRequestException(
-          'Session already started or is in the past',
-        );
-      }
-
-      const existingBooking = await manager
-        .getRepository(Booking)
-        .createQueryBuilder('b')
-        .innerJoin('b.user', 'u')
-        .innerJoin('b.session', 's')
-        .where('u.id = :userId', { userId })
-        .andWhere('s.id = :sessionId', { sessionId })
-        .orderBy('b.createdAt', 'DESC')
-        .getOne();
-
-      if (existingBooking) {
-        this.logger.warn(
-          `BOOKING_CREATE_EXISTING_BOOKING userId=${userId} sessionId=${sessionId} existingBookingId=${existingBooking.id} status=${existingBooking.status}`,
-        );
-
-        throw new ConflictException(
-          this.getDuplicateBookingMessage(existingBooking.status),
-        );
-      }
-
-      const activeCount = await manager
-        .getRepository(Booking)
-        .createQueryBuilder('b')
-        .innerJoin('b.session', 's')
-        .where('s.id = :sessionId', { sessionId })
-        .andWhere('b.status IN (:...statuses)', {
-          statuses: [BookingStatus.PENDING, BookingStatus.CONFIRMED],
-        })
-        .getCount();
-
-      if (activeCount >= session.max_participants) {
-        this.logger.warn(
-          `BOOKING_CREATE_FULL userId=${userId} sessionId=${sessionId} activeCount=${activeCount} maxParticipants=${session.max_participants}`,
-        );
-        throw new ConflictException('Session is fully booked');
-      }
-
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-      const booking = manager.create(Booking, {
-        user: { id: userId } as any,
-        session: { id: sessionId } as any,
-        status: BookingStatus.PENDING,
-        intro_message: introMessage?.trim() || null,
-        expires_at: expiresAt,
-      });
-
-      let savedBooking: Booking;
-
-      try {
-        savedBooking = await manager.save(booking);
-      } catch (error: any) {
-        if (this.isUniqueConstraintViolation(error)) {
-          this.logger.warn(
-            `BOOKING_CREATE_DUPLICATE_DB_CONSTRAINT userId=${userId} sessionId=${sessionId}`,
-          );
-
-          const latestBooking = await manager
-            .getRepository(Booking)
-            .createQueryBuilder('b')
-            .innerJoin('b.user', 'u')
-            .innerJoin('b.session', 's')
-            .where('u.id = :userId', { userId })
-            .andWhere('s.id = :sessionId', { sessionId })
-            .orderBy('b.createdAt', 'DESC')
-            .getOne();
-
-          throw new ConflictException(
-            this.getDuplicateBookingMessage(latestBooking?.status),
-          );
-        }
-
-        throw error;
-      }
-
-      await manager.getRepository(Notification).save(
-        manager.getRepository(Notification).create({
-          user_id: sessionWithTeacher.teacher.id,
-          type: 'new_booking_started',
-          title: 'New booking started',
-          body: `A learner started booking ${sessionWithTeacher.class?.title ?? 'your session'}. Payment is still pending.`,
-          payload: {
-            booking_id: savedBooking.id,
-            session_id: sessionWithTeacher.id,
-            class_title: sessionWithTeacher.class?.title ?? null,
-          },
-        }),
-      );
-
-      this.logger.log(
-        `BOOKING_CREATE_SUCCESS bookingId=${savedBooking.id} userId=${userId} sessionId=${sessionId}`,
-      );
-
-      return savedBooking;
-    });
-  }
+    return savedBooking;
+  });
+}
 
   async getBookingByIdForLifecycle(
     bookingId: string,
@@ -287,61 +335,77 @@ export class BookingsService {
     return saved;
   }
 
-  async cancelBookingByLearner(bookingId: string, learnerId: string) {
-    const booking = await this.getBookingByIdForLifecycle(bookingId);
+ async cancelBookingByLearner(bookingId: string, learnerId: string) {
+  const booking = await this.getBookingByIdForLifecycle(bookingId);
 
-    if (booking.user.id !== learnerId) {
-      throw new ForbiddenException('Not your booking');
-    }
+  if (booking.user.id !== learnerId) {
+    throw new ForbiddenException('Not your booking');
+  }
 
-    if (booking.status !== BookingStatus.CONFIRMED) {
-      throw new BadRequestException('Only confirmed bookings can be cancelled');
-    }
+  const cancellableStatuses = [
+    BookingStatus.PENDING,
+    BookingStatus.CONFIRMED,
+  ];
 
-    booking.status = BookingStatus.CANCELLED_BY_LEARNER;
-    booking.cancelled_at = new Date();
-    booking.cancelled_by_user_id = learnerId;
+  if (!cancellableStatuses.includes(booking.status)) {
+    throw new BadRequestException('This booking can no longer be cancelled');
+  }
 
-    const saved = await this.dataSource.getRepository(Booking).save(booking);
+  const wasConfirmed = booking.status === BookingStatus.CONFIRMED;
 
-    const classTitle = saved.session?.class?.title ?? 'your session';
+  booking.status = BookingStatus.CANCELLED_BY_LEARNER;
+  booking.cancelled_at = new Date();
+  booking.cancelled_by_user_id = learnerId;
 
-    if (saved.session?.teacher?.id) {
-      await this.dataSource.getRepository(Notification).save(
-        this.dataSource.getRepository(Notification).create({
-          user_id: saved.session.teacher.id,
-          type: 'booking_cancelled_by_learner',
-          title: 'Booking cancelled',
-          body: `A learner cancelled their booking for ${classTitle}.`,
-          payload: {
-            booking_id: saved.id,
-            session_id: saved.session?.id,
-            class_title: classTitle,
-          },
-        }),
-      );
+  const saved = await this.dataSource.getRepository(Booking).save(booking);
 
-      await this.pushNotificationsService.sendToUser(saved.session.teacher.id, {
+  const classTitle = saved.session?.class?.title ?? 'your session';
+
+  if (saved.session?.teacher?.id) {
+    await this.dataSource.getRepository(Notification).save(
+      this.dataSource.getRepository(Notification).create({
+        user_id: saved.session.teacher.id,
+        type: 'booking_cancelled_by_learner',
         title: 'Booking cancelled',
-        body: `A learner cancelled their booking for ${classTitle}.`,
-        data: {
-          type: 'booking_cancelled_by_learner',
+        body: wasConfirmed
+          ? `A learner cancelled their booking for ${classTitle}.`
+          : `A learner cancelled their pending booking for ${classTitle}.`,
+        payload: {
           booking_id: saved.id,
           session_id: saved.session?.id,
           class_title: classTitle,
+          was_confirmed: wasConfirmed,
         },
-      });
-    }
-
-    this.logger.log(
-      `BOOKING_CANCELLED_BY_LEARNER bookingId=${saved.id} learnerId=${learnerId}`,
+      }),
     );
 
-    await this.triggerRefundFlowForCancelledBooking(saved.id);
-    await this.sendBookingCancelledEmails(saved, 'learner');
-
-    return saved;
+    await this.pushNotificationsService.sendToUser(saved.session.teacher.id, {
+      title: 'Booking cancelled',
+      body: wasConfirmed
+        ? `A learner cancelled their booking for ${classTitle}.`
+        : `A learner cancelled their pending booking for ${classTitle}.`,
+      data: {
+        type: 'booking_cancelled_by_learner',
+        booking_id: saved.id,
+        session_id: saved.session?.id,
+        class_title: classTitle,
+        was_confirmed: String(wasConfirmed),
+      },
+    });
   }
+
+  this.logger.log(
+    `BOOKING_CANCELLED_BY_LEARNER bookingId=${saved.id} learnerId=${learnerId} wasConfirmed=${wasConfirmed}`,
+  );
+
+if (wasConfirmed) {
+  await this.triggerRefundFlowForCancelledBooking(saved.id);
+}
+
+await this.sendBookingCancelledEmails(saved, 'learner');
+
+  return saved;
+}
 
   async cancelBookingByTeacher(bookingId: string, teacherId: string) {
     const booking = await this.getBookingByIdForLifecycle(bookingId);
@@ -351,10 +415,13 @@ export class BookingsService {
         'You can only cancel your own session bookings',
       );
     }
-
-    if (booking.status !== BookingStatus.CONFIRMED) {
-      throw new BadRequestException('Only confirmed bookings can be cancelled');
-    }
+const wasConfirmed = booking.status === BookingStatus.CONFIRMED;
+if (
+  booking.status !== BookingStatus.CONFIRMED &&
+  booking.status !== BookingStatus.PENDING
+) {
+  throw new BadRequestException('Only pending or confirmed bookings can be cancelled');
+}
 
     booking.status = BookingStatus.CANCELLED_BY_TEACHER;
     booking.cancelled_at = new Date();
@@ -393,9 +460,11 @@ export class BookingsService {
       `BOOKING_CANCELLED_BY_TEACHER bookingId=${saved.id} teacherId=${teacherId}`,
     );
 
-    await this.triggerRefundFlowForCancelledBooking(saved.id);
-    await this.sendBookingCancelledEmails(saved, 'teacher');
+if (wasConfirmed) {
+  await this.triggerRefundFlowForCancelledBooking(saved.id);
+}
 
+await this.sendBookingCancelledEmails(saved, 'teacher');
     return saved;
   }
 
@@ -531,41 +600,56 @@ export class BookingsService {
     return saved;
   }
 
-  async getMyBookings(userId: string) {
-    this.logger.log(`BOOKINGS_GET_MY_BOOKINGS userId=${userId}`);
+async getMyBookings(userId: string) {
+  this.logger.log(`BOOKINGS_GET_MY_BOOKINGS userId=${userId}`);
 
-    return this.dataSource
-      .getRepository(Booking)
-      .createQueryBuilder('b')
-      .leftJoinAndSelect('b.session', 's')
-      .leftJoinAndSelect('s.class', 'c')
-      .leftJoinAndSelect('s.teacher', 't')
-      .leftJoin('teacher_profiles', 'tp', 'tp.user_id = t.id')
-      .where('b.user_id = :userId', { userId })
-      .orderBy('s.start_time', 'ASC')
-      .select([
-        'b.id AS booking_id',
-        'b.status AS booking_status',
-        'b.createdAt AS booking_created_at',
-        'b.confirmed_at AS booking_confirmed_at',
-        'b.cancelled_at AS booking_cancelled_at',
-        'b.refunded_at AS booking_refunded_at',
+  return this.dataSource
+    .getRepository(Booking)
+    .createQueryBuilder('b')
+    .leftJoinAndSelect('b.session', 's')
+    .leftJoinAndSelect('s.class', 'c')
+    .leftJoinAndSelect('s.teacher', 't')
+    .leftJoin('teacher_profiles', 'tp', 'tp.user_id = t.id')
+    .where('b.user_id = :userId', { userId })
+    .orderBy('s.start_time', 'ASC')
+    .select([
+      'b.id AS booking_id',
+      'b.status AS booking_status',
+      'b.createdAt AS booking_created_at',
+      'b.confirmed_at AS booking_confirmed_at',
+      'b.cancelled_at AS booking_cancelled_at',
+      'b.refunded_at AS booking_refunded_at',
 
-        's.id AS session_id',
-        's.start_time AS session_start_time',
-        's.price AS session_price',
-        's.max_participants AS session_max_participants',
-        's.rough_location AS session_rough_location',
-        's.arrival_instructions AS session_arrival_instructions',
-        's.session_type AS session_type',
+      's.id AS session_id',
+      's.start_time AS session_start_time',
+      's.price AS session_price',
+      's.max_participants AS session_max_participants',
+      's.rough_location AS session_rough_location',
 
-        'c.title AS class_title',
-        'c.category AS class_category',
+      `CASE
+        WHEN b.status = 'CONFIRMED' THEN ST_Y(s.location::geometry)
+        ELSE NULL
+      END AS session_lat`,
 
-        'tp.full_name AS teacher_name',
-      ])
-      .getRawMany();
-  }
+      `CASE
+        WHEN b.status = 'CONFIRMED' THEN ST_X(s.location::geometry)
+        ELSE NULL
+      END AS session_lng`,
+
+      `CASE
+        WHEN b.status = 'CONFIRMED' THEN s.arrival_instructions
+        ELSE NULL
+      END AS session_arrival_instructions`,
+
+      's.session_type AS session_type',
+
+      'c.title AS class_title',
+      'c.category AS class_category',
+
+      'tp.full_name AS teacher_name',
+    ])
+    .getRawMany();
+}
 
   private async triggerRefundFlowForCancelledBooking(
     bookingId: string,
@@ -984,6 +1068,26 @@ export class BookingsService {
     return 'Location shared in the app';
   }
 
+  private getSessionLat(session: any): number | null {
+  const coords = session?.location?.coordinates;
+
+  if (!Array.isArray(coords) || coords.length < 2) {
+    return null;
+  }
+
+  return typeof coords[1] === 'number' ? coords[1] : null;
+}
+
+private getSessionLng(session: any): number | null {
+  const coords = session?.location?.coordinates;
+
+  if (!Array.isArray(coords) || coords.length < 2) {
+    return null;
+  }
+
+  return typeof coords[0] === 'number' ? coords[0] : null;
+}
+
   async getBookingDetailsForLearner(bookingId: string, learnerId: string) {
     this.logger.log(
       `BOOKING_GET_DETAILS_ATTEMPT bookingId=${bookingId} learnerId=${learnerId}`,
@@ -1035,8 +1139,19 @@ export class BookingsService {
             duration: booking.session.duration,
             price: booking.session.price,
             max_participants: booking.session.max_participants,
-            rough_location: booking.session.rough_location,
-            arrival_instructions: booking.session.arrival_instructions,
+rough_location: booking.session.rough_location,
+arrival_instructions:
+  booking.status === BookingStatus.CONFIRMED
+    ? booking.session.arrival_instructions
+    : null,
+session_lat:
+  booking.status === BookingStatus.CONFIRMED
+    ? this.getSessionLat(booking.session)
+    : null,
+session_lng:
+  booking.status === BookingStatus.CONFIRMED
+    ? this.getSessionLng(booking.session)
+    : null,
             session_type: booking.session.session_type ?? SessionType.GROUP,
             private_invitee_user_id:
               booking.session.private_invitee_user_id ?? null,

@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { stableOffsetCoordinates } from '../utils/location-offset';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   Session,
   SessionStatus,
@@ -25,6 +26,12 @@ const PRIMARY_CATEGORY_SLUGS = [
   'language',
   'crafts',
 ];
+
+const REVIEW_STATUS = {
+  PENDING_REVIEW: 'PENDING_REVIEW',
+  ACTIVE: 'ACTIVE',
+  REJECTED: 'REJECTED',
+} as const;
 
 type CreateSessionInternalInput = {
   teacher: User;
@@ -51,7 +58,7 @@ type CreateSessionInternalInput = {
 export class SessionsService {
   constructor(
     @InjectRepository(Session)
-    private readonly sessionsRepository: Repository<Session>,
+    public readonly sessionsRepository: Repository<Session>,
 
     @InjectRepository(Class)
     private readonly classesRepository: Repository<Class>,
@@ -61,6 +68,8 @@ export class SessionsService {
 
     @InjectRepository(Booking)
     private readonly bookingsRepository: Repository<Booking>,
+
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private async assertTeacherCanCreatePaidSessions(teacherId: string) {
@@ -108,6 +117,155 @@ export class SessionsService {
     }
   }
 
+  async approveSessionForReview(sessionId: string) {
+    const session = await this.sessionsRepository.findOne({
+      where: { id: sessionId },
+      relations: ['teacher', 'class'],
+    });
+
+    if (!session) {
+      throw new BadRequestException('Session not found');
+    }
+
+    session.reviewStatus = REVIEW_STATUS.ACTIVE;
+
+    await this.sessionsRepository.save(session);
+
+    await this.notificationsService.create({
+      user_id: session.teacher.id,
+      type: 'SESSION_APPROVED',
+      title: 'Session approved',
+      body: `Your session "${session.class.title}" is now live and visible to learners.`,
+      payload: {
+        session_id: session.id,
+        review_status: REVIEW_STATUS.ACTIVE,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Session approved successfully',
+    };
+  }
+
+  async getMySessionById(sessionId: string, teacherId: string) {
+    const session = await this.sessionsRepository.findOne({
+      where: { id: sessionId },
+      relations: ['teacher', 'class'],
+    });
+
+    if (!session) {
+      throw new BadRequestException('Session not found');
+    }
+
+    if (session.teacher.id !== teacherId) {
+      throw new ForbiddenException('You can only view your own session');
+    }
+
+    const coordinates = (session.location as any)?.coordinates ?? [];
+    const lng = Number(coordinates[0]);
+    const lat = Number(coordinates[1]);
+
+    const bookingsCount = await this.bookingsRepository
+      .createQueryBuilder('booking')
+      .where('booking.session_id = :sessionId', { sessionId })
+      .andWhere('booking.status IN (:...statuses)', {
+        statuses: ['PENDING', 'CONFIRMED'],
+      })
+      .getCount();
+
+    const image_urls = [
+      session.class.image_url_1,
+      session.class.image_url_2,
+      session.class.image_url_3,
+    ].filter(Boolean);
+
+    return {
+      id: session.id,
+      class_id: session.class.id,
+      start_time: session.start_time,
+      duration: Number(session.duration),
+      price: Number(session.price),
+      max_participants: Number(session.max_participants),
+      bookings_count: bookingsCount,
+      status: session.status,
+      review_status: session.reviewStatus,
+      cancelled_at: session.cancelled_at ?? null,
+      session_type: session.session_type ?? SessionType.GROUP,
+      private_invitee_user_id: session.private_invitee_user_id ?? null,
+      rough_location: session.rough_location ?? '',
+      arrival_instructions: session.arrival_instructions ?? null,
+      image_urls,
+      lat,
+      lng,
+      class: {
+        title: session.class.title ?? 'Session',
+        description: session.class.description ?? null,
+        category: session.class.category ?? null,
+      },
+      teacher: {
+        id: session.teacher.id,
+      },
+    };
+  }
+
+  async rejectSessionForReview(sessionId: string, reason?: string) {
+    const session = await this.sessionsRepository.findOne({
+      where: { id: sessionId },
+      relations: ['teacher', 'class'],
+    });
+
+    if (!session) {
+      throw new BadRequestException('Session not found');
+    }
+
+    const trimmedReason = reason?.trim() || null;
+
+    session.reviewStatus = REVIEW_STATUS.REJECTED;
+
+    await this.sessionsRepository.save(session);
+
+    await this.notificationsService.create({
+      user_id: session.teacher.id,
+      type: 'SESSION_REJECTED',
+      title: 'Session needs changes',
+      body: trimmedReason
+        ? `Your session "${session.class.title}" was not approved. Reason: ${trimmedReason}`
+        : `Your session "${session.class.title}" was not approved. Please review the details and submit again.`,
+      payload: {
+        session_id: session.id,
+        review_status: REVIEW_STATUS.REJECTED,
+        reason: trimmedReason,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Session rejected successfully',
+    };
+  }
+
+  async getPendingReviewSessions() {
+    return this.sessionsRepository
+      .createQueryBuilder('session')
+      .leftJoin('session.class', 'class')
+      .leftJoin('session.teacher', 'teacher')
+      .select([
+        'session.id AS id',
+        'session.start_time AS start_time',
+        'session.price AS price',
+        'session.reviewStatus AS review_status',
+        'class.title AS title',
+        'class.category AS category',
+        'teacher.id AS teacher_id',
+      ])
+      .where('session.reviewStatus = :status', {
+        status: REVIEW_STATUS.PENDING_REVIEW,
+      })
+      .orderBy('session.start_time', 'ASC')
+      .getRawMany();
+  }
+
   private async createSessionWithClass(
     input: CreateSessionInternalInput,
   ): Promise<Session> {
@@ -116,6 +274,8 @@ export class SessionsService {
     const description = input.description?.trim() || null;
     const roughLocation = input.rough_location?.trim() || null;
     const arrivalInstructions = input.arrival_instructions?.trim() || null;
+
+    const sessionType = input.session_type ?? SessionType.GROUP;
 
     if (!title) {
       throw new BadRequestException('Title is required');
@@ -140,8 +300,24 @@ export class SessionsService {
       throw new BadRequestException('Invalid max_participants');
     }
 
+    if (sessionType === SessionType.PRIVATE && input.max_participants !== 1) {
+      throw new BadRequestException(
+        'Private sessions must have exactly 1 participant.',
+      );
+    }
+
+    if (sessionType === SessionType.PRIVATE && !input.private_invitee_user_id) {
+      throw new BadRequestException(
+        'Private sessions require an invited learner.',
+      );
+    }
+
     if (!Number.isFinite(input.lat) || !Number.isFinite(input.lng)) {
       throw new BadRequestException('Invalid location');
+    }
+
+    if (!roughLocation) {
+      throw new BadRequestException('Public location is required');
     }
 
     if (arrivalInstructions && arrivalInstructions.length > 300) {
@@ -171,18 +347,18 @@ export class SessionsService {
       endTime,
     );
 
-const classEntity = this.classesRepository.create({
-  teacher: input.teacher,
-  title,
-  category,
-  description,
-  priceCents: Math.round(input.price * 100),
-  image_url_1: input.image_url_1?.trim() || null,
-  image_url_2: input.image_url_2?.trim() || null,
-  image_url_3: input.image_url_3?.trim() || null,
-});
+    const classEntity = this.classesRepository.create({
+      teacher: input.teacher,
+      title,
+      category,
+      description,
+      priceCents: Math.round(input.price * 100),
+      image_url_1: input.image_url_1?.trim() || null,
+      image_url_2: input.image_url_2?.trim() || null,
+      image_url_3: input.image_url_3?.trim() || null,
+    });
 
-const savedClass = await this.classesRepository.save(classEntity);
+    const savedClass = await this.classesRepository.save(classEntity);
 
     const session = this.sessionsRepository.create({
       class: savedClass,
@@ -190,7 +366,8 @@ const savedClass = await this.classesRepository.save(classEntity);
       start_time: input.start_time,
       duration: input.duration,
       end_time: endTime,
-      max_participants: input.max_participants,
+      max_participants:
+        sessionType === SessionType.PRIVATE ? 1 : input.max_participants,
       location: {
         type: 'Point',
         coordinates: [input.lng, input.lat],
@@ -199,10 +376,17 @@ const savedClass = await this.classesRepository.save(classEntity);
       rough_location: roughLocation,
       arrival_instructions: arrivalInstructions,
       status: SessionStatus.ACTIVE,
+      reviewStatus:
+        sessionType === SessionType.PRIVATE
+          ? REVIEW_STATUS.ACTIVE
+          : REVIEW_STATUS.PENDING_REVIEW,
       cancelled_at: null,
-      session_type: input.session_type ?? SessionType.GROUP,
+      session_type: sessionType,
       private_request: input.private_request ?? null,
-      private_invitee_user_id: input.private_invitee_user_id ?? null,
+      private_invitee_user_id:
+        sessionType === SessionType.PRIVATE
+          ? input.private_invitee_user_id
+          : null,
     });
 
     return this.sessionsRepository.save(session);
@@ -264,6 +448,14 @@ const savedClass = await this.classesRepository.save(classEntity);
       throw new BadRequestException('Invalid start_time');
     }
 
+    const learnerId = params.privateRequest.learner?.id;
+
+    if (!learnerId) {
+      throw new BadRequestException(
+        'Cannot create private session without the requesting learner.',
+      );
+    }
+
     return this.createSessionWithClass({
       teacher,
       title: params.title,
@@ -282,7 +474,7 @@ const savedClass = await this.classesRepository.save(classEntity);
       arrival_instructions: params.arrival_instructions ?? null,
       session_type: SessionType.PRIVATE,
       private_request: params.privateRequest,
-      private_invitee_user_id: params.privateRequest.learner?.id ?? null,
+      private_invitee_user_id: learnerId,
     });
   }
 
@@ -334,9 +526,11 @@ const savedClass = await this.classesRepository.save(classEntity);
     }
 
     const nextMaxParticipants =
-      typeof dto.max_participants === 'number'
-        ? dto.max_participants
-        : session.max_participants;
+      session.session_type === SessionType.PRIVATE
+        ? 1
+        : typeof dto.max_participants === 'number'
+          ? dto.max_participants
+          : session.max_participants;
 
     if (!Number.isFinite(nextMaxParticipants) || nextMaxParticipants <= 0) {
       throw new BadRequestException('Invalid max_participants');
@@ -416,9 +610,9 @@ const savedClass = await this.classesRepository.save(classEntity);
       session.class.description = dto.description.trim() || null;
     }
 
-if (typeof dto.price === 'number') {
-  session.class.priceCents = Math.round(dto.price * 100);
-}
+    if (typeof dto.price === 'number') {
+      session.class.priceCents = Math.round(dto.price * 100);
+    }
 
     if (typeof dto.image_url_1 === 'string') {
       session.class.image_url_1 = dto.image_url_1.trim() || null;
@@ -431,6 +625,11 @@ if (typeof dto.price === 'number') {
     if (typeof dto.image_url_3 === 'string') {
       session.class.image_url_3 = dto.image_url_3.trim() || null;
     }
+
+    session.reviewStatus =
+      session.session_type === SessionType.PRIVATE
+        ? REVIEW_STATUS.ACTIVE
+        : REVIEW_STATUS.PENDING_REVIEW;
 
     await this.classesRepository.save(session.class);
 
@@ -489,9 +688,10 @@ if (typeof dto.price === 'number') {
       start_time: start,
       end_time: endTime,
       duration: original.duration,
+      reviewStatus: REVIEW_STATUS.PENDING_REVIEW,
       max_participants:
         original.session_type === SessionType.PRIVATE
-          ? 1
+          ? 6
           : original.max_participants,
       price: original.price,
       location: original.location,
@@ -499,10 +699,7 @@ if (typeof dto.price === 'number') {
       arrival_instructions: original.arrival_instructions ?? null,
       status: SessionStatus.ACTIVE,
       cancelled_at: null,
-      session_type:
-        original.session_type === SessionType.PRIVATE
-          ? SessionType.GROUP
-          : original.session_type ?? SessionType.GROUP,
+      session_type: SessionType.GROUP,
       private_request: null,
       private_invitee_user_id: null,
     });
@@ -620,6 +817,9 @@ if (typeof dto.price === 'number') {
       )
       .andWhere('session.start_time > NOW()')
       .andWhere('session.status = :status', { status: SessionStatus.ACTIVE })
+      .andWhere('session.reviewStatus = :reviewStatus', {
+        reviewStatus: REVIEW_STATUS.ACTIVE,
+      })
       .andWhere('session.session_type = :sessionType', {
         sessionType: SessionType.GROUP,
       });
@@ -644,7 +844,7 @@ if (typeof dto.price === 'number') {
         session.session_id,
         lat,
         lng,
-        100,
+        50,
       );
 
       return {
@@ -669,6 +869,7 @@ if (typeof dto.price === 'number') {
         'session.rough_location AS rough_location',
         'session.arrival_instructions AS arrival_instructions',
         'session.status AS status',
+        'session.reviewStatus AS review_status',
         'session.cancelled_at AS cancelled_at',
         'session.session_type AS session_type',
         'session.private_invitee_user_id AS private_invitee_user_id',
@@ -689,6 +890,13 @@ if (typeof dto.price === 'number') {
       .getRawOne();
 
     if (!sessionRow) {
+      throw new BadRequestException('Session not found');
+    }
+
+    if (
+      sessionRow.session_type === SessionType.GROUP &&
+      sessionRow.review_status !== REVIEW_STATUS.ACTIVE
+    ) {
       throw new BadRequestException('Session not found');
     }
 
@@ -761,12 +969,13 @@ if (typeof dto.price === 'number') {
       spots_left: spotsLeft,
       attendee_first_names,
       status: sessionRow.status,
+      review_status: sessionRow.review_status,
       cancelled_at: sessionRow.cancelled_at ?? null,
       session_type: sessionRow.session_type ?? SessionType.GROUP,
       private_invitee_user_id: sessionRow.private_invitee_user_id ?? null,
       rough_location:
         sessionRow.rough_location ?? 'Exact location shared after booking',
-      arrival_instructions: sessionRow.arrival_instructions ?? null,
+arrival_instructions: null,
       image_urls,
       lat: Number(sessionRow.lat),
       lng: Number(sessionRow.lng),
@@ -806,6 +1015,7 @@ if (typeof dto.price === 'number') {
         'session.price AS price',
         'session.rough_location AS rough_location',
         'session.status AS status',
+        'session.reviewStatus AS review_status',
         'session.cancelled_at AS cancelled_at',
         'session.session_type AS session_type',
         'session.private_invitee_user_id AS private_invitee_user_id',
@@ -884,6 +1094,7 @@ if (typeof dto.price === 'number') {
         price: session.price,
         arrival_instructions: session.arrival_instructions ?? null,
         status: session.status,
+        review_status: session.reviewStatus,
         cancelled_at: session.cancelled_at ?? null,
         session_type: session.session_type ?? SessionType.GROUP,
         private_invitee_user_id: session.private_invitee_user_id ?? null,
@@ -919,9 +1130,20 @@ if (typeof dto.price === 'number') {
       ])
       .where('session.start_time > NOW()')
       .andWhere('session.status = :status', { status: SessionStatus.ACTIVE })
+      .andWhere('session.reviewStatus = :reviewStatus', {
+        reviewStatus: REVIEW_STATUS.ACTIVE,
+      })
       .andWhere('session.session_type = :sessionType', {
         sessionType: SessionType.GROUP,
       })
+      .andWhere(
+        `ST_DWithin(
+          session.location::geography,
+          ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+          :radiusMeters
+        )`,
+        { radiusMeters: 20_000 },
+      )
       .setParameters({ lat, lng });
 
     if (category && category !== 'all') {

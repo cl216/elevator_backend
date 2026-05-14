@@ -430,9 +430,9 @@ export class PaymentsService {
         },
         metadata: { bookingId: booking.id },
       },
-      {
-        idempotencyKey: `checkout_${booking.id}`,
-      },
+{
+  idempotencyKey: `checkout_${booking.id}_${Date.now()}`,
+},
     );
 
     booking.stripe_checkout_session_id = session.id;
@@ -448,6 +448,78 @@ export class PaymentsService {
 
     return { checkoutUrl: session.url, checkoutSessionId: session.id };
   }
+
+  async syncCheckoutStatus(bookingId: string, learnerId: string) {
+  this.logger.log(
+    `PAYMENT_CHECKOUT_SYNC_ATTEMPT bookingId=${bookingId} learnerId=${learnerId}`,
+  );
+
+  const booking = await this.bookingRepo.findOne({
+    where: { id: bookingId },
+    relations: {
+      user: true,
+      session: { class: true, teacher: true },
+    } as any,
+  });
+
+  if (!booking) {
+    throw new NotFoundException("Booking not found");
+  }
+
+  if (booking.user.id !== learnerId) {
+    throw new ForbiddenException("Not your booking");
+  }
+
+  if (booking.status === BookingStatus.CONFIRMED) {
+    return {
+      status: booking.status,
+      bookingId: booking.id,
+      message: "Booking already confirmed.",
+    };
+  }
+
+  if (!booking.stripe_checkout_session_id) {
+    return {
+      status: booking.status,
+      bookingId: booking.id,
+      message: "No Stripe checkout session found for this booking.",
+    };
+  }
+
+  const checkoutSession = await this.stripe.checkout.sessions.retrieve(
+    booking.stripe_checkout_session_id,
+  );
+
+  this.logger.log(
+    `PAYMENT_CHECKOUT_SYNC_STRIPE_STATUS bookingId=${booking.id} checkoutSessionId=${checkoutSession.id} stripeStatus=${checkoutSession.status} paymentStatus=${checkoutSession.payment_status}`,
+  );
+
+  if (
+    checkoutSession.status === "complete" &&
+    checkoutSession.payment_status === "paid"
+  ) {
+    await this.bookingsService.markBookingConfirmed({
+      bookingId: booking.id,
+      stripePaymentIntentId: String(checkoutSession.payment_intent ?? ""),
+      stripeCheckoutSessionId: checkoutSession.id,
+      paidAt: new Date(),
+    });
+
+    return {
+      status: BookingStatus.CONFIRMED,
+      bookingId: booking.id,
+      message: "Payment confirmed.",
+    };
+  }
+
+  return {
+    status: booking.status,
+    bookingId: booking.id,
+    stripeStatus: checkoutSession.status,
+    paymentStatus: checkoutSession.payment_status,
+    message: "Payment has not been confirmed by Stripe yet.",
+  };
+}
 
   async listSavedPaymentMethods(learnerId: string) {
     const stripeCustomerId = await this.getOrCreateStripeCustomerForLearner(

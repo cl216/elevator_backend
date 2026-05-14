@@ -5,6 +5,7 @@ import {
   Body,
   UseGuards,
   Param,
+  HttpCode, HttpStatus
 } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
@@ -42,20 +43,21 @@ export class BookingsController {
       user.id,
     );
   }
+@Post(':bookingId/cancel/learner')
+@HttpCode(HttpStatus.OK)
+cancelByLearner(
+  @CurrentUser() user: { id: string },
+  @Param('bookingId') bookingId: string,
+) {
+  return this.bookingsService.cancelBookingByLearner(bookingId, user.id);
+}
 
-  @Post(':bookingId/cancel/learner')
-  cancelByLearner(
-    @CurrentUser() user: { id: string },
-    @Param('bookingId') bookingId: string,
-  ) {
-    return this.bookingsService.cancelBookingByLearner(bookingId, user.id);
-  }
-
-  @Post(':bookingId/cancel/teacher')
-  cancelByTeacher(
-    @CurrentUser() user: { id: string },
-    @Param('bookingId') bookingId: string,
-  ) {
-    return this.bookingsService.cancelBookingByTeacher(bookingId, user.id);
-  }
+@Post(':bookingId/cancel/teacher')
+@HttpCode(HttpStatus.OK)
+cancelByTeacher(
+  @CurrentUser() user: { id: string },
+  @Param('bookingId') bookingId: string,
+) {
+  return this.bookingsService.cancelBookingByTeacher(bookingId, user.id);
+}
 }

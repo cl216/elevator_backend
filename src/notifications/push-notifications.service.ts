@@ -11,21 +11,33 @@ type PushPayload = {
 export class PushNotificationsService {
   private readonly logger = new Logger(PushNotificationsService.name);
 
-  constructor(
-    private readonly notificationsService: NotificationsService,
-  ) {}
+  constructor(private readonly notificationsService: NotificationsService) {}
 
-  async sendToUser(userId: string, payload: PushPayload) {
-    const tokens = await this.notificationsService.getActiveTokensForUser(userId);
+async sendToUser(
+  userId: string,
+  titleOrPayload: string | PushPayload,
+  body?: string,
+  data?: Record<string, any>,
+) {
+  const payload: PushPayload =
+    typeof titleOrPayload === "string"
+      ? {
+          title: titleOrPayload,
+          body: body ?? "",
+          data,
+        }
+      : titleOrPayload;
 
+  const tokens = await this.notificationsService.getActiveTokensForUser(userId);
     if (!tokens.length) {
       this.logger.log(`PUSH_SEND_SKIPPED_NO_TOKENS userId=${userId}`);
       return;
     }
 
-    const validExpoTokens = tokens.filter((token) =>
-      token.startsWith('ExponentPushToken[') ||
-      token.startsWith('ExpoPushToken['),
+    const validExpoTokens = tokens.filter(
+      (token) =>
+        token.startsWith('ExponentPushToken[') ||
+        token.startsWith('ExpoPushToken['),
     );
 
     if (!validExpoTokens.length) {
@@ -54,15 +66,17 @@ export class PushNotificationsService {
     const json: any = await response.json();
 
     const invalidTokens = new Set<string>();
+const responseData = Array.isArray(json?.data) ? json.data : [];
 
-    const data = Array.isArray(json?.data) ? json.data : [];
-    data.forEach((item: any, index: number) => {
+responseData.forEach((item: any, index: number) => {
       if (item?.status === 'error') {
         const detailsError = item?.details?.error;
         const token = validExpoTokens[index];
 
         this.logger.warn(
-          `PUSH_SEND_ITEM_FAILED userId=${userId} token=${token} error=${detailsError ?? item?.message ?? 'unknown'}`,
+          `PUSH_SEND_ITEM_FAILED userId=${userId} token=${token} error=${
+            detailsError ?? item?.message ?? 'unknown'
+          }`,
         );
 
         if (
@@ -82,6 +96,4 @@ export class PushNotificationsService {
       `PUSH_SEND_COMPLETED userId=${userId} requested=${validExpoTokens.length} invalidated=${invalidTokens.size}`,
     );
   }
-
-  
 }

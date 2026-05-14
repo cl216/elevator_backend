@@ -6,7 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource} from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { randomBytes, createHash } from 'crypto';
 import { User } from '../users/user.entity';
 import { JwtService } from '@nestjs/jwt';
@@ -28,80 +28,67 @@ export class AuthService {
     private userRepository: Repository<User>,
     private jwtService: JwtService,
     private mailService: MailService,
-      private dataSource: DataSource,
+    private dataSource: DataSource,
   ) {}
 
   async deleteMe(userId: string) {
-  await this.dataSource.transaction(async (manager) => {
-    // Reviews depend on bookings/users.
-    await manager.query(
-      `DELETE FROM reviews WHERE learner_id = $1 OR teacher_id = $1`,
-      [userId],
-    );
+    await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        `DELETE FROM reviews WHERE learner_id = $1 OR teacher_id = $1`,
+        [userId],
+      );
 
-    // Bookings depend on users/sessions.
-    await manager.query(
-      `DELETE FROM bookings WHERE user_id = $1 OR cancelled_by_user_id = $1`,
-      [userId],
-    );
+      await manager.query(
+        `DELETE FROM bookings WHERE user_id = $1 OR cancelled_by_user_id = $1`,
+        [userId],
+      );
 
-    // Notifications are user-owned.
-    await manager.query(
-      `DELETE FROM notifications WHERE user_id = $1`,
-      [userId],
-    );
+      await manager.query(`DELETE FROM notifications WHERE user_id = $1`, [
+        userId,
+      ]);
 
-    // Teacher followers.
-    await manager.query(
-      `DELETE FROM teacher_followers WHERE user_id = $1 OR teacher_id = $1`,
-      [userId],
-    );
+      await manager.query(
+        `DELETE FROM teacher_followers WHERE user_id = $1 OR teacher_id = $1`,
+        [userId],
+      );
 
-    // Private requests where user is learner or teacher.
-    await manager.query(
-      `DELETE FROM private_session_requests WHERE learner_id = $1 OR teacher_id = $1`,
-      [userId],
-    );
+      await manager.query(
+        `DELETE FROM private_session_requests WHERE learner_id = $1 OR teacher_id = $1`,
+        [userId],
+      );
 
-    // Sessions taught by user.
-    await manager.query(
-      `DELETE FROM sessions WHERE teacher_id = $1 OR private_invitee_user_id = $1`,
-      [userId],
-    );
+      await manager.query(
+        `DELETE FROM sessions WHERE teacher_id = $1 OR private_invitee_user_id = $1`,
+        [userId],
+      );
 
-    // Teacher profile.
-    await manager.query(
-      `DELETE FROM teacher_profiles WHERE user_id = $1`,
-      [userId],
-    );
+      await manager.query(`DELETE FROM teacher_profiles WHERE user_id = $1`, [
+        userId,
+      ]);
 
-    // Finally user.
-    await manager.query(
-      `DELETE FROM users WHERE id = $1`,
-      [userId],
-    );
-  });
+      await manager.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    });
 
-  this.logger.log(`AUTH_DELETE_ACCOUNT_SUCCESS userId=${userId}`);
+    this.logger.log(`AUTH_DELETE_ACCOUNT_SUCCESS userId=${userId}`);
 
-  return { success: true };
-}
-
-async deleteAccount(userId: string) {
-  const user = await this.userRepository.findOne({
-    where: { id: userId },
-  });
-
-  if (!user) {
     return { success: true };
   }
 
-  await this.userRepository.remove(user);
+  async deleteAccount(userId: string) {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+    });
 
-  this.logger.log(`AUTH_DELETE_ACCOUNT_SUCCESS userId=${userId}`);
+    if (!user) {
+      return { success: true };
+    }
 
-  return { success: true };
-}
+    await this.userRepository.remove(user);
+
+    this.logger.log(`AUTH_DELETE_ACCOUNT_SUCCESS userId=${userId}`);
+
+    return { success: true };
+  }
 
   private get isProduction() {
     return process.env.NODE_ENV === 'production';
@@ -121,6 +108,7 @@ async deleteAccount(userId: string) {
 
   private buildDevVerificationPayload(rawToken: string) {
     if (this.isProduction) return {};
+
     return {
       dev_verification_token: rawToken,
       dev_verification_url: `elevator://verify-email?token=${encodeURIComponent(rawToken)}`,
@@ -129,6 +117,7 @@ async deleteAccount(userId: string) {
 
   private buildDevResetPayload(rawToken: string) {
     if (this.isProduction) return {};
+
     return {
       dev_reset_token: rawToken,
       dev_reset_url: `elevator://reset-password?token=${encodeURIComponent(rawToken)}`,
@@ -142,6 +131,7 @@ async deleteAccount(userId: string) {
       sub: user.id,
       email: user.email,
       role: user.role,
+      is_admin: user.is_admin === true,
       hasTeacherProfile,
       emailVerified,
     };
@@ -151,6 +141,7 @@ async deleteAccount(userId: string) {
     sub: string;
     email: string;
     role: string;
+    is_admin: boolean;
     hasTeacherProfile: boolean;
     emailVerified: boolean;
   }) {
@@ -174,7 +165,12 @@ async deleteAccount(userId: string) {
     await this.userRepository.save(user);
   }
 
-  private buildAuthResponse(user: User, hasTeacherProfile: boolean, accessToken: string, refreshToken: string) {
+  private buildAuthResponse(
+    user: User,
+    hasTeacherProfile: boolean,
+    accessToken: string,
+    refreshToken: string,
+  ) {
     const emailVerified = this.isProduction ? !!user.email_verified_at : true;
 
     return {
@@ -185,6 +181,8 @@ async deleteAccount(userId: string) {
         first_name: user.first_name,
         email: user.email,
         role: user.role,
+        image_url: user.image_url,
+        is_admin: user.is_admin === true,
         hasTeacherProfile,
         email_verified: emailVerified,
       },
@@ -220,6 +218,7 @@ async deleteAccount(userId: string) {
       email: normalizedEmail,
       password_hash: hashed,
       role: 'LEARNER',
+      image_url: null,
       email_verified_at: autoVerifiedInDev ? new Date() : null,
       email_verification_token: autoVerifiedInDev ? null : hashedToken,
       email_verification_expires_at: autoVerifiedInDev ? null : expiresAt,
@@ -237,6 +236,7 @@ async deleteAccount(userId: string) {
         first_name: user.first_name,
         email: user.email,
         role: user.role,
+        image_url: user.image_url,
         hasTeacherProfile: false,
         email_verified: true,
         message: 'Account created and auto-verified in development mode.',
@@ -255,6 +255,7 @@ async deleteAccount(userId: string) {
         first_name: user.first_name,
         email: user.email,
         role: user.role,
+        image_url: user.image_url,
         hasTeacherProfile: false,
         email_verified: false,
         message:
@@ -272,6 +273,7 @@ async deleteAccount(userId: string) {
       first_name: user.first_name,
       email: user.email,
       role: user.role,
+      image_url: user.image_url,
       hasTeacherProfile: false,
       email_verified: false,
       message: 'Account created. Please verify your email before logging in.',
@@ -360,10 +362,7 @@ async deleteAccount(userId: string) {
       throw new UnauthorizedException('Refresh token expired');
     }
 
-    const matches = await bcrypt.compare(
-      refreshToken,
-      user.refresh_token_hash,
-    );
+    const matches = await bcrypt.compare(refreshToken, user.refresh_token_hash);
 
     if (!matches) {
       throw new UnauthorizedException('Invalid refresh token');
@@ -586,6 +585,35 @@ async deleteAccount(userId: string) {
     };
   }
 
+  async updateMyProfilePhoto(userId: string, imageUrl: string) {
+    const trimmedImageUrl = imageUrl?.trim();
+
+    if (!trimmedImageUrl) {
+      throw new BadRequestException('Profile image URL is required');
+    }
+
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    user.image_url = trimmedImageUrl;
+
+    await this.userRepository.save(user);
+
+    return {
+      id: user.id,
+      first_name: user.first_name,
+      email: user.email,
+      role: user.role,
+      image_url: user.image_url,
+      is_admin: user.is_admin === true,
+    };
+  }
+
   async getMe(userId: string) {
     const user = await this.userRepository.findOne({
       where: { id: userId },
@@ -601,6 +629,8 @@ async deleteAccount(userId: string) {
       first_name: user.first_name,
       email: user.email,
       role: user.role,
+      image_url: user.image_url,
+      is_admin: user.is_admin === true,
       hasTeacherProfile: !!user.teacherProfile,
       email_verified: this.isProduction ? !!user.email_verified_at : true,
     };

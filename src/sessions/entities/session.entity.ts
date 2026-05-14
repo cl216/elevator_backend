@@ -49,6 +49,7 @@ export class Session {
   @Column({ type: 'decimal' })
   price: number;
 
+  
   @Column({
     type: 'geometry',
     spatialFeatureType: 'Point',
@@ -68,6 +69,9 @@ export class Session {
     default: SessionStatus.ACTIVE,
   })
   status: SessionStatus;
+
+  @Column({ name: "review_status", type: "text", default: "PENDING_REVIEW" })
+reviewStatus: "PENDING_REVIEW" | "ACTIVE" | "REJECTED";
 
   @Column({ type: 'timestamp', nullable: true })
   cancelled_at: Date | null;

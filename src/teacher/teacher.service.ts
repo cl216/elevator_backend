@@ -4,7 +4,6 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { TeacherProfile } from './entities/teacher-profile.entity';
 import { TeacherFollower } from './entities/teacher-follower.entity';
@@ -14,10 +13,12 @@ import { containsBlockedContactOrOffPlatformContent } from '../utils/content-mod
 import { Booking } from '../bookings/entities/booking.entity';
 import { Session } from '../sessions/entities/session.entity';
 import { ReviewsService } from '../reviews/reviews.service';
+import { Repository, DataSource } from 'typeorm';
 
 @Injectable()
 export class TeacherService {
   constructor(
+    private readonly dataSource: DataSource,
     @InjectRepository(TeacherProfile)
     private profileRepo: Repository<TeacherProfile>,
 
@@ -33,8 +34,138 @@ export class TeacherService {
     @InjectRepository(Session)
     private sessionRepo: Repository<Session>,
 
+    
     private readonly reviewsService: ReviewsService,
   ) {}
+
+  async getTeacherAttentionSummary(teacherId: string) {
+  const openPrivateRequests = await this.dataSource.query(
+    `
+    SELECT COUNT(*)::int AS count
+    FROM private_session_requests
+    WHERE teacher_id = $1
+      AND status = 'OPEN'
+    `,
+    [teacherId],
+  );
+
+  const refundIssues = await this.dataSource.query(
+    `
+    SELECT COUNT(*)::int AS count
+    FROM bookings b
+    INNER JOIN sessions s ON s.id = b.session_id
+    WHERE s.teacher_id = $1
+      AND b.status = 'REFUND_FAILED'
+    `,
+    [teacherId],
+  );
+
+  const missingArrivalInstructions = await this.dataSource.query(
+    `
+    SELECT COUNT(DISTINCT s.id)::int AS count
+    FROM sessions s
+    INNER JOIN bookings b ON b.session_id = s.id
+    WHERE s.teacher_id = $1
+      AND b.status = 'CONFIRMED'
+      AND s.start_time > NOW()
+      AND (
+        s.arrival_instructions IS NULL
+        OR LENGTH(TRIM(s.arrival_instructions)) = 0
+      )
+    `,
+    [teacherId],
+  );
+
+  const sessionsToday = await this.dataSource.query(
+    `
+    SELECT COUNT(*)::int AS count
+    FROM sessions s
+    WHERE s.teacher_id = $1
+      AND s.status = 'ACTIVE'
+      AND s.start_time >= NOW()
+      AND s.start_time < NOW() + INTERVAL '24 hours'
+    `,
+    [teacherId],
+  );
+
+  const openPrivateRequestsCount = Number(openPrivateRequests?.[0]?.count ?? 0);
+  const refundIssuesCount = Number(refundIssues?.[0]?.count ?? 0);
+  const missingArrivalInstructionsCount = Number(
+    missingArrivalInstructions?.[0]?.count ?? 0,
+  );
+  const sessionsTodayCount = Number(sessionsToday?.[0]?.count ?? 0);
+
+  const items: any[] = [];
+
+  if (openPrivateRequestsCount > 0) {
+    items.push({
+      type: 'private_requests',
+      count: openPrivateRequestsCount,
+      label:
+        openPrivateRequestsCount === 1
+          ? '1 private request waiting'
+          : `${openPrivateRequestsCount} private requests waiting`,
+      priority: 'high',
+      route: '/(teacher)/private-session-requests',
+      actionLabel: 'Review requests',
+      countsTowardBadge: true,
+    });
+  }
+
+  if (missingArrivalInstructionsCount > 0) {
+    items.push({
+      type: 'missing_arrival_instructions',
+      count: missingArrivalInstructionsCount,
+      label:
+        missingArrivalInstructionsCount === 1
+          ? '1 booked session needs arrival instructions'
+          : `${missingArrivalInstructionsCount} booked sessions need arrival instructions`,
+      priority: 'high',
+      route: '/(teacher)/sessions',
+      actionLabel: 'Update sessions',
+      countsTowardBadge: true,
+    });
+  }
+
+  if (refundIssuesCount > 0) {
+    items.push({
+      type: 'refund_issues',
+      count: refundIssuesCount,
+      label:
+        refundIssuesCount === 1
+          ? '1 refund issue needs attention'
+          : `${refundIssuesCount} refund issues need attention`,
+      priority: 'high',
+      route: '/(teacher)/sessions',
+      actionLabel: 'Review bookings',
+      countsTowardBadge: true,
+    });
+  }
+
+  if (sessionsTodayCount > 0) {
+    items.push({
+      type: 'sessions_today',
+      count: sessionsTodayCount,
+      label:
+        sessionsTodayCount === 1
+          ? '1 session coming up in the next 24 hours'
+          : `${sessionsTodayCount} sessions coming up in the next 24 hours`,
+      priority: 'medium',
+      route: '/(teacher)/sessions',
+      actionLabel: 'View sessions',
+      countsTowardBadge: false,
+    });
+  }
+
+  const totalActionItems = items
+    .filter((item) => item.countsTowardBadge)
+    .reduce((sum, item) => sum + item.count, 0);
+
+  return {
+    total_action_items: totalActionItems,
+    items,
+  };
+}
 
 async createProfile(user: User, dto: CreateTeacherProfileDto) {
   if (dto.bio && containsBlockedContactOrOffPlatformContent(dto.bio)) {

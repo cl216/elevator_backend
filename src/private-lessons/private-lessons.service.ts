@@ -50,7 +50,7 @@ export class PrivateSessionRequestsService {
     private readonly privateSessionRequestsRepo: Repository<PrivateSessionRequest>,
 
     @InjectRepository(Notification)
-private readonly notificationsRepo: Repository<Notification>,
+    private readonly notificationsRepo: Repository<Notification>,
 
     @InjectRepository(TeacherProfile)
     private readonly teacherProfilesRepo: Repository<TeacherProfile>,
@@ -111,22 +111,23 @@ private readonly notificationsRepo: Repository<Notification>,
       status: PrivateSessionRequestStatus.OPEN,
     });
 
-const savedRequest = await this.privateSessionRequestsRepo.save(request);
+    const savedRequest = await this.privateSessionRequestsRepo.save(request);
 
-await this.notificationsRepo.save(
-  this.notificationsRepo.create({
-    user_id: input.teacherId,
-    type: 'private_session_request_created',
-    title: 'New private session request',
-    body: 'A learner sent you a private 1:1 request.',
-    payload: {
-      private_session_request_id: savedRequest.id,
-      learner_id: input.learnerId,
-    },
-  }),
-);
+    await this.notificationsRepo.save(
+      this.notificationsRepo.create({
+        user_id: input.teacherId,
+        type: 'private_session_request_created',
+        title: 'New private session request',
+        body: 'A learner sent you a private 1:1 request.',
+        payload: {
+          private_session_request_id: savedRequest.id,
+          learner_id: input.learnerId,
+        },
+      }),
+    );
 
-return savedRequest;  }
+    return savedRequest;
+  }
 
   async getMyLearnerRequests(learnerId: string) {
     return this.privateSessionRequestsRepo.find({
@@ -183,7 +184,8 @@ return savedRequest;  }
   ) {
     const request = await this.privateSessionRequestsRepo.findOne({
       where: { id: requestId },
-relations: ['teacher', 'learner'],    });
+      relations: ['teacher', 'learner'],
+    });
 
     if (!request) {
       throw new NotFoundException('Private session request not found.');
@@ -209,24 +211,24 @@ relations: ['teacher', 'learner'],    });
     request.declined_at = new Date();
     request.teacher_response_message = trimmedMessage;
 
-const savedRequest = await this.privateSessionRequestsRepo.save(request);
+    const savedRequest = await this.privateSessionRequestsRepo.save(request);
 
-await this.notificationsRepo.save(
-  this.notificationsRepo.create({
-    user_id: savedRequest.learner.id,
-    type: 'private_session_request_declined',
-    title: 'Private request declined',
-    body: trimmedMessage
-      ? 'Your private session request was declined with a message from the teacher.'
-      : 'Your private session request was declined.',
-    payload: {
-      private_session_request_id: savedRequest.id,
-      teacher_response_message: savedRequest.teacher_response_message,
-    },
-  }),
-);
+    await this.notificationsRepo.save(
+      this.notificationsRepo.create({
+        user_id: savedRequest.learner.id,
+        type: 'private_session_request_declined',
+        title: 'Private request declined',
+        body: trimmedMessage
+          ? 'Your private session request was declined with a message from the teacher.'
+          : 'Your private session request was declined.',
+        payload: {
+          private_session_request_id: savedRequest.id,
+          teacher_response_message: savedRequest.teacher_response_message,
+        },
+      }),
+    );
 
-return savedRequest;
+    return savedRequest;
   }
 
   async acceptRequest(input: AcceptPrivateSessionRequestInput) {
@@ -272,49 +274,66 @@ return savedRequest;
     }
 
     const startTime = new Date(input.startTime);
+
     if (
       Number.isNaN(startTime.getTime()) ||
       startTime.getTime() <= Date.now()
     ) {
-      throw new BadRequestException('Start time must be a valid future date.');
+      throw new BadRequestException(
+        'Start time must be a valid future date.',
+      );
     }
 
-    const savedSession = await this.sessionsService.createAcceptedPrivateSession({
-      teacherId: input.teacherId,
-      privateRequest: request,
-      title: input.title.trim(),
-      category: input.category.trim(),
-      description: input.description?.trim() || null,
-      price: input.price,
-      start_time: input.startTime,
-      duration: input.duration,
-      lat: input.lat,
-      lng: input.lng,
-      rough_location: input.roughLocation.trim(),
-      arrival_instructions: input.arrivalInstructions?.trim() || null,
-    });
+    const savedSession =
+      await this.sessionsService.createAcceptedPrivateSession({
+        teacherId: input.teacherId,
 
-    //request.teacher_response_message = null;
+        privateRequest: request,
+
+        title: input.title.trim(),
+
+        category: input.category.trim(),
+
+        description: input.description?.trim() || null,
+
+        price: input.price,
+
+        start_time: input.startTime,
+
+        duration: input.duration,
+
+        lat: input.lat,
+
+        lng: input.lng,
+
+        rough_location: input.roughLocation.trim(),
+
+        arrival_instructions:
+          input.arrivalInstructions?.trim() || null,
 
 
-request.status = PrivateSessionRequestStatus.ACCEPTED;
-request.accepted_at = new Date();
-request.accepted_session_id = savedSession.id;
+      });
 
-const savedRequest = await this.privateSessionRequestsRepo.save(request);
+    request.status = PrivateSessionRequestStatus.ACCEPTED;
+    request.accepted_at = new Date();
+    request.accepted_session_id = savedSession.id;
 
-await this.notificationsRepo.save(
-  this.notificationsRepo.create({
-    user_id: savedRequest.learner.id,
-    type: 'private_session_request_accepted',
-    title: 'Private request accepted',
-    body: 'Your teacher created a private session for you to book.',
-    payload: {
-      private_session_request_id: savedRequest.id,
-      session_id: savedSession.id,
-    },
-  }),
-);
+    const savedRequest =
+      await this.privateSessionRequestsRepo.save(request);
 
-return savedSession;  }
+    await this.notificationsRepo.save(
+      this.notificationsRepo.create({
+        user_id: savedRequest.learner.id,
+        type: 'private_session_request_accepted',
+        title: 'Private request accepted',
+        body: 'Your teacher created a private session for you to book.',
+        payload: {
+          private_session_request_id: savedRequest.id,
+          session_id: savedSession.id,
+        },
+      }),
+    );
+
+    return savedSession;
+  }
 }

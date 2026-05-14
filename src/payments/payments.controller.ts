@@ -45,6 +45,21 @@ export class PaymentsController {
     return this.paymentsService.createCheckoutSession(bookingId, user.id);
   }
 
+@Post('checkout/:bookingId/sync')
+@UseGuards(JwtAuthGuard)
+syncCheckoutStatus(
+  @CurrentUser() user: { id: string },
+  @Req() req: Request,
+) {
+const bookingId = String(req.params.bookingId);
+
+  if (!bookingId) {
+    throw new BadRequestException('bookingId is required');
+  }
+
+  return this.paymentsService.syncCheckoutStatus(bookingId, user.id);
+}
+
   @Get('methods')
   @UseGuards(JwtAuthGuard)
   getSavedPaymentMethods(@CurrentUser() user: { id: string }) {
