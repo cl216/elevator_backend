@@ -62,4 +62,8 @@ image_url: string | null;
 
   @Column({ type: 'boolean', default: false })
 is_admin: boolean;
+
+@Column({ type: 'boolean', default: false })
+is_suspended: boolean;
+
 }

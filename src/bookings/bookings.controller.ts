@@ -1,11 +1,12 @@
 import {
-  Controller,
-  Post,
-  Get,
   Body,
+  Controller,
+  Get,
+  Post,
   UseGuards,
   Param,
-  HttpCode, HttpStatus
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { BookingsService } from './bookings.service';
 import { JwtAuthGuard } from '../auth/jwt.guard';
@@ -43,21 +44,67 @@ export class BookingsController {
       user.id,
     );
   }
-@Post(':bookingId/cancel/learner')
-@HttpCode(HttpStatus.OK)
-cancelByLearner(
-  @CurrentUser() user: { id: string },
-  @Param('bookingId') bookingId: string,
-) {
-  return this.bookingsService.cancelBookingByLearner(bookingId, user.id);
-}
 
-@Post(':bookingId/cancel/teacher')
-@HttpCode(HttpStatus.OK)
-cancelByTeacher(
-  @CurrentUser() user: { id: string },
-  @Param('bookingId') bookingId: string,
-) {
-  return this.bookingsService.cancelBookingByTeacher(bookingId, user.id);
-}
+  @Post(':bookingId/cancel/learner')
+  @HttpCode(HttpStatus.OK)
+  cancelByLearner(
+    @CurrentUser() user: { id: string },
+    @Param('bookingId') bookingId: string,
+  ) {
+    return this.bookingsService.cancelBookingByLearner(bookingId, user.id);
+  }
+
+  @Post(':bookingId/cancel/teacher')
+  @HttpCode(HttpStatus.OK)
+  cancelByTeacher(
+    @CurrentUser() user: { id: string },
+    @Param('bookingId') bookingId: string,
+  ) {
+    return this.bookingsService.cancelBookingByTeacher(bookingId, user.id);
+  }
+
+  /**
+   * Teacher reports that learner did not show.
+   * No automatic refund.
+   * Booking can still be paid out later.
+   */
+  @Post(':bookingId/no-show/learner')
+  @HttpCode(HttpStatus.OK)
+  markLearnerNoShow(
+    @CurrentUser() user: { id: string },
+    @Param('bookingId') bookingId: string,
+  ) {
+    return this.bookingsService.markLearnerNoShow(bookingId, user.id);
+  }
+
+  /**
+   * Learner reports that teacher did not show.
+   * Starts refund flow.
+   */
+  @Post(':bookingId/no-show/teacher')
+  @HttpCode(HttpStatus.OK)
+  markTeacherNoShow(
+    @CurrentUser() user: { id: string },
+    @Param('bookingId') bookingId: string,
+  ) {
+    return this.bookingsService.markTeacherNoShow(bookingId, user.id);
+  }
+
+  /**
+   * Learner disputes a completed/confirmed booking.
+   * Blocks payout until admin resolves.
+   */
+  @Post(':bookingId/dispute')
+  @HttpCode(HttpStatus.OK)
+  disputeBooking(
+    @CurrentUser() user: { id: string },
+    @Param('bookingId') bookingId: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.bookingsService.disputeBooking(
+      bookingId,
+      user.id,
+      body?.reason,
+    );
+  }
 }

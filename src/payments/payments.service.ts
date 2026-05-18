@@ -128,6 +128,23 @@ export class PaymentsService {
       paidAt: new Date(),
     });
 
+    if (confirmedBooking.stripe_payment_intent_id) {
+  try {
+    const feeData = await this.syncActualStripeFees(
+      confirmedBooking.stripe_payment_intent_id,
+    );
+
+    confirmedBooking.stripe_fee_amount =
+      feeData.stripeFeeAmount;
+
+    await this.bookingRepo.save(confirmedBooking);
+  } catch (e) {
+    this.logger.warn(
+      `FAILED_TO_SYNC_REAL_STRIPE_FEES bookingId=${confirmedBooking.id}`,
+    );
+  }
+}
+
     const classTitle = confirmedBooking.session?.class?.title ?? 'your session';
 
     const learnerName =
@@ -350,14 +367,40 @@ export class PaymentsService {
       );
     }
 
-    const priceEuros = booking.session.price;
+const lessonPriceEuros = Number(booking.session.price);
 
-    if (!Number.isFinite(priceEuros) || priceEuros <= 0) {
-      throw new BadRequestException('Invalid session price');
-    }
+if (!Number.isFinite(lessonPriceEuros) || lessonPriceEuros <= 0) {
+  throw new BadRequestException('Invalid session price');
+}
 
-    const amount = Math.round(priceEuros * 100);
-    const currency = process.env.PAYMENTS_CURRENCY ?? 'eur';
+/*
+  PLATFORM FEES
+
+  Example:
+  lesson = €40
+  platform fee = 10%
+  stripe estimate ≈ 3%
+
+  learner pays:
+  40 + 4 + 1.20 = €45.20
+
+  teacher later receives:
+  €40
+*/
+
+const lessonAmount = Math.round(lessonPriceEuros * 100);
+
+const platformFeeAmount = 300;
+
+const estimatedStripeFeeAmount =
+  Math.round((lessonAmount + platformFeeAmount) * 0.015) + 25;
+
+const totalAmount =
+  lessonAmount +
+  platformFeeAmount +
+  estimatedStripeFeeAmount;
+
+const currency = process.env.PAYMENTS_CURRENCY ?? 'eur';
 
     const successUrl = process.env.CHECKOUT_SUCCESS_URL;
     const cancelUrl = process.env.CHECKOUT_CANCEL_URL;
@@ -412,16 +455,40 @@ export class PaymentsService {
         customer: stripeCustomerId,
         payment_method_types: ['card'],
         client_reference_id: booking.id,
-        line_items: [
-          {
-            price_data: {
-              currency,
-              product_data: { name: `Booking ${booking.id}` },
-              unit_amount: amount,
-            },
-            quantity: 1,
-          },
-        ],
+      line_items: [
+  {
+    price_data: {
+      currency,
+      product_data: {
+        name: booking.session.class?.title || "Lesson",
+      },
+      unit_amount: lessonAmount,
+    },
+    quantity: 1,
+  },
+
+  {
+    price_data: {
+      currency,
+      product_data: {
+        name: "Elevator platform fee",
+      },
+      unit_amount: platformFeeAmount,
+    },
+    quantity: 1,
+  },
+
+  {
+    price_data: {
+      currency,
+      product_data: {
+        name: "Payment processing fee",
+      },
+      unit_amount: estimatedStripeFeeAmount,
+    },
+    quantity: 1,
+  },
+],
         success_url: successUrl,
         cancel_url: cancelUrl,
         payment_intent_data: {
@@ -436,8 +503,19 @@ export class PaymentsService {
     );
 
     booking.stripe_checkout_session_id = session.id;
-    booking.amount = amount;
-    booking.currency = currency;
+booking.lesson_amount = lessonAmount;
+
+booking.platform_fee_amount = platformFeeAmount;
+
+booking.stripe_fee_amount = estimatedStripeFeeAmount;
+
+booking.total_amount = totalAmount;
+
+booking.teacher_payout_amount = lessonAmount;
+
+booking.amount = totalAmount;
+
+booking.currency = currency;
     booking.checkout_created_at = new Date();
 
     await this.bookingRepo.save(booking);
@@ -521,6 +599,28 @@ export class PaymentsService {
   };
 }
 
+private async syncActualStripeFees(
+  paymentIntentId: string,
+) {
+  const paymentIntent = await this.stripe.paymentIntents.retrieve(
+    paymentIntentId,
+    {
+      expand: ['latest_charge.balance_transaction'],
+    },
+  );
+
+  const latestCharge = paymentIntent.latest_charge as Stripe.Charge;
+
+  const balanceTransaction =
+    latestCharge.balance_transaction as Stripe.BalanceTransaction;
+
+  return {
+    stripeFeeAmount: balanceTransaction.fee,
+    stripeNetAmount: balanceTransaction.net,
+  };
+}
+
+
   async listSavedPaymentMethods(learnerId: string) {
     const stripeCustomerId = await this.getOrCreateStripeCustomerForLearner(
       learnerId,
@@ -603,10 +703,11 @@ export class PaymentsService {
     }
 
     if (
-      booking.status !== BookingStatus.CANCELLED_BY_LEARNER &&
-      booking.status !== BookingStatus.CANCELLED_BY_TEACHER &&
-      booking.status !== BookingStatus.REFUND_FAILED &&
-      booking.status !== BookingStatus.REFUND_PENDING
+booking.status !== BookingStatus.CANCELLED_BY_LEARNER &&
+booking.status !== BookingStatus.CANCELLED_BY_TEACHER &&
+booking.status !== BookingStatus.TEACHER_NO_SHOW &&
+booking.status !== BookingStatus.REFUND_FAILED &&
+booking.status !== BookingStatus.REFUND_PENDING
     ) {
       this.logger.warn(
         `PAYMENT_REFUND_INVALID_STATUS bookingId=${bookingId} status=${booking.status}`,

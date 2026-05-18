@@ -19,6 +19,10 @@ export enum BookingStatus {
   REFUNDED = 'REFUNDED',
   REFUND_FAILED = 'REFUND_FAILED',
   EXPIRED = 'EXPIRED',
+  COMPLETED = 'COMPLETED',
+  LEARNER_NO_SHOW = 'LEARNER_NO_SHOW',
+  TEACHER_NO_SHOW = 'TEACHER_NO_SHOW',
+  DISPUTED = 'DISPUTED',
 }
 
 export enum PayoutStatus {
@@ -54,8 +58,8 @@ export class Booking {
   @Column({ type: 'timestamp', nullable: true })
   expires_at: Date | null;
 
-@CreateDateColumn({ name: "created_at" })
-createdAt: Date;
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
 
   @Column({ type: 'timestamp', nullable: true })
   confirmed_at: Date | null;
@@ -114,8 +118,44 @@ createdAt: Date;
   @Column({ type: 'timestamp', nullable: true })
   paid_at: Date | null;
 
+  /**
+   * Total amount charged to the learner, in cents.
+   * This should equal total_amount once checkout is created.
+   */
   @Column({ type: 'int', nullable: true })
   amount: number | null;
+
+  /**
+   * Lesson base price, in cents.
+   */
+  @Column({ type: 'int', nullable: true })
+  lesson_amount: number | null;
+
+  /**
+   * Elevator platform/service fee charged to learner, in cents.
+   */
+  @Column({ type: 'int', nullable: true })
+  platform_fee_amount: number | null;
+
+  /**
+   * Estimated Stripe/payment processing fee charged to learner, in cents.
+   */
+  @Column({ type: 'int', nullable: true })
+  stripe_fee_amount: number | null;
+
+  /**
+   * Full learner charge, in cents.
+   * lesson_amount + platform_fee_amount + stripe_fee_amount.
+   */
+  @Column({ type: 'int', nullable: true })
+  total_amount: number | null;
+
+  /**
+   * Amount the teacher should receive, in cents.
+   * Payout cron must use this, not amount.
+   */
+  @Column({ type: 'int', nullable: true })
+  teacher_payout_amount: number | null;
 
   @Column({ type: 'text', nullable: true })
   currency: string | null;
@@ -144,4 +184,19 @@ createdAt: Date;
 
   @Column({ type: 'text', nullable: true })
   payout_failure_reason: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  completed_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  disputed_at: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  dispute_reason: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  learner_no_show_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  teacher_no_show_at: Date | null;
 }

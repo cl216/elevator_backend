@@ -302,6 +302,11 @@ export class AuthService {
       this.logger.warn(`AUTH_LOGIN_FAILED_BAD_PASSWORD userId=${user.id}`);
       throw new UnauthorizedException('Invalid credentials');
     }
+    if (user.is_suspended) {
+  throw new UnauthorizedException(
+    'Your account has been suspended.',
+  );
+}
 
     if (this.isProduction && !user.email_verified_at) {
       this.logger.warn(`AUTH_LOGIN_BLOCKED_UNVERIFIED userId=${user.id}`);

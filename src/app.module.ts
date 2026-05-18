@@ -5,7 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
-
+import { AdminModule } from './admin/admin.module';
 import { ServeStaticModule } from "@nestjs/serve-static";
 import { join } from "path";
 import { UploadsModule } from "./uploads/uploads.module";
@@ -70,7 +70,7 @@ UploadsModule,
       {
         name: 'short',
         ttl: 60_000,
-        limit: 20,
+        limit: 500,
       },
     ]),
 
@@ -87,7 +87,7 @@ UploadsModule,
     CategoriesModule,
     NotificationsModule,
     PrivateSessionRequestsModule,
-
+AdminModule,
   ],
   providers: [
     {

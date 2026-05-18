@@ -8,6 +8,7 @@ import {
   Inject,
   forwardRef,
 } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { DataSource, QueryFailedError } from 'typeorm';
 import { Booking, BookingStatus } from './entities/booking.entity';
 import { Session, SessionType } from '../sessions/entities/session.entity';
@@ -141,6 +142,18 @@ function resetBookingForFreshCheckout(booking: Booking) {
   booking.stripe_payment_intent_id = null;
   booking.amount = null;
   booking.currency = null;
+
+  booking.lesson_amount = null;
+booking.platform_fee_amount = null;
+booking.stripe_fee_amount = null;
+booking.total_amount = null;
+booking.teacher_payout_amount = null;
+
+booking.completed_at = null;
+booking.disputed_at = null;
+booking.dispute_reason = null;
+booking.learner_no_show_at = null;
+booking.teacher_no_show_at = null;
 
   return booking;
 }
@@ -482,9 +495,10 @@ await this.sendBookingCancelledEmails(saved, 'teacher');
     }
 
     if (
-      booking.status !== BookingStatus.CANCELLED_BY_LEARNER &&
-      booking.status !== BookingStatus.CANCELLED_BY_TEACHER &&
-      booking.status !== BookingStatus.REFUND_FAILED
+booking.status !== BookingStatus.CANCELLED_BY_LEARNER &&
+booking.status !== BookingStatus.CANCELLED_BY_TEACHER &&
+booking.status !== BookingStatus.TEACHER_NO_SHOW &&
+booking.status !== BookingStatus.REFUND_FAILED
     ) {
       throw new BadRequestException(
         'Only cancelled or refund-failed bookings can move to refund pending',
@@ -568,10 +582,11 @@ await this.sendBookingCancelledEmails(saved, 'teacher');
     const booking = await this.getBookingByIdForLifecycle(bookingId);
 
     if (
-      booking.status !== BookingStatus.REFUND_PENDING &&
-      booking.status !== BookingStatus.CANCELLED_BY_LEARNER &&
-      booking.status !== BookingStatus.CANCELLED_BY_TEACHER &&
-      booking.status !== BookingStatus.REFUND_FAILED
+booking.status !== BookingStatus.REFUND_PENDING &&
+booking.status !== BookingStatus.CANCELLED_BY_LEARNER &&
+booking.status !== BookingStatus.CANCELLED_BY_TEACHER &&
+booking.status !== BookingStatus.TEACHER_NO_SHOW &&
+booking.status !== BookingStatus.REFUND_FAILED
     ) {
       throw new BadRequestException(
         'Only cancelled, refund-pending, or refund-failed bookings can be marked refund failed',
@@ -600,6 +615,320 @@ await this.sendBookingCancelledEmails(saved, 'teacher');
     return saved;
   }
 
+    async markLearnerNoShow(bookingId: string, teacherId: string) {
+    const booking = await this.getBookingByIdForLifecycle(bookingId);
+
+    if (booking.session?.teacher?.id !== teacherId) {
+      throw new ForbiddenException(
+        'You can only mark no-show for your own session bookings',
+      );
+    }
+
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new BadRequestException(
+        'Only confirmed bookings can be marked as learner no-show',
+      );
+    }
+
+    const sessionStart = booking.session?.start_time
+      ? new Date(booking.session.start_time)
+      : null;
+
+    if (!sessionStart || Number.isNaN(sessionStart.getTime())) {
+      throw new BadRequestException('Invalid session start time');
+    }
+
+    if (sessionStart.getTime() > Date.now()) {
+      throw new BadRequestException(
+        'You can only mark learner no-show after the session has started',
+      );
+    }
+
+booking.status = BookingStatus.DISPUTED;
+booking.learner_no_show_at = new Date();
+booking.disputed_at = new Date();
+booking.dispute_reason = 'learner_no_show_reported';
+
+    const saved = await this.dataSource.getRepository(Booking).save(booking);
+
+    const classTitle = saved.session?.class?.title ?? 'your session';
+
+    await this.dataSource.getRepository(Notification).save(
+      this.dataSource.getRepository(Notification).create({
+        user_id: saved.user.id,
+        type: 'learner_no_show_recorded',
+        title: 'No-show recorded',
+        body: `The teacher marked you as not present for ${classTitle}. You can contact support if this is incorrect.`,
+        payload: {
+          booking_id: saved.id,
+          session_id: saved.session?.id,
+          class_title: classTitle,
+        },
+      }),
+    );
+
+    await this.pushNotificationsService.sendToUser(saved.user.id, {
+      title: 'No-show recorded',
+      body: `The teacher marked you as not present for ${classTitle}.`,
+      data: {
+        type: 'learner_no_show_recorded',
+        booking_id: saved.id,
+        session_id: saved.session?.id,
+        class_title: classTitle,
+      },
+    });
+
+    this.logger.log(
+      `BOOKING_LEARNER_NO_SHOW bookingId=${saved.id} teacherId=${teacherId}`,
+    );
+
+    return saved;
+  }
+
+  async markTeacherNoShow(bookingId: string, learnerId: string) {
+    const booking = await this.getBookingByIdForLifecycle(bookingId);
+
+    if (booking.user.id !== learnerId) {
+      throw new ForbiddenException('Not your booking');
+    }
+
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new BadRequestException(
+        'Only confirmed bookings can be marked as teacher no-show',
+      );
+    }
+
+    const sessionStart = booking.session?.start_time
+      ? new Date(booking.session.start_time)
+      : null;
+
+    if (!sessionStart || Number.isNaN(sessionStart.getTime())) {
+      throw new BadRequestException('Invalid session start time');
+    }
+
+    if (sessionStart.getTime() > Date.now()) {
+      throw new BadRequestException(
+        'You can only report teacher no-show after the session has started',
+      );
+    }
+
+booking.status = BookingStatus.DISPUTED;
+booking.teacher_no_show_at = new Date();
+booking.disputed_at = new Date();
+booking.dispute_reason = 'teacher_no_show_reported';
+
+    const saved = await this.dataSource.getRepository(Booking).save(booking);
+
+    const classTitle = saved.session?.class?.title ?? 'your session';
+
+    if (saved.session?.teacher?.id) {
+      await this.dataSource.getRepository(Notification).save(
+        this.dataSource.getRepository(Notification).create({
+          user_id: saved.session.teacher.id,
+          type: 'teacher_no_show_reported',
+          title: 'Teacher no-show reported',
+          body: `A learner reported that you did not attend ${classTitle}.`,
+          payload: {
+            booking_id: saved.id,
+            session_id: saved.session?.id,
+            class_title: classTitle,
+          },
+        }),
+      );
+
+      await this.pushNotificationsService.sendToUser(saved.session.teacher.id, {
+        title: 'Teacher no-show reported',
+        body: `A learner reported that you did not attend ${classTitle}.`,
+        data: {
+          type: 'teacher_no_show_reported',
+          booking_id: saved.id,
+          session_id: saved.session?.id,
+          class_title: classTitle,
+        },
+      });
+    }
+
+    this.logger.warn(
+      `BOOKING_TEACHER_NO_SHOW bookingId=${saved.id} learnerId=${learnerId}`,
+    );
+
+
+    return saved;
+  }
+
+  async disputeBooking(
+    bookingId: string,
+    learnerId: string,
+    reason?: string,
+  ) {
+    const booking = await this.getBookingByIdForLifecycle(bookingId);
+
+    if (booking.user.id !== learnerId) {
+      throw new ForbiddenException('Not your booking');
+    }
+
+    if (
+      booking.status !== BookingStatus.CONFIRMED &&
+      booking.status !== BookingStatus.COMPLETED &&
+      booking.status !== BookingStatus.LEARNER_NO_SHOW
+    ) {
+      throw new BadRequestException(
+        'Only confirmed, completed, or no-show bookings can be disputed',
+      );
+    }
+
+    const sessionEnd = booking.session?.end_time
+      ? new Date(booking.session.end_time)
+      : null;
+
+    if (!sessionEnd || Number.isNaN(sessionEnd.getTime())) {
+      throw new BadRequestException('Invalid session end time');
+    }
+
+    const hoursSinceEnd =
+      (Date.now() - sessionEnd.getTime()) / (1000 * 60 * 60);
+
+if (hoursSinceEnd < 0) {
+  throw new BadRequestException(
+    'You can only dispute after the session ends',
+  );
+}
+
+if (hoursSinceEnd > 24) {
+  throw new BadRequestException(
+    'Disputes must be raised within 24 hours after the session ends',
+  );
+}
+    booking.status = BookingStatus.DISPUTED;
+    booking.disputed_at = new Date();
+    booking.dispute_reason = reason?.trim() || null;
+
+    const saved = await this.dataSource.getRepository(Booking).save(booking);
+
+    const classTitle = saved.session?.class?.title ?? 'your session';
+
+    if (saved.session?.teacher?.id) {
+      await this.dataSource.getRepository(Notification).save(
+        this.dataSource.getRepository(Notification).create({
+          user_id: saved.session.teacher.id,
+          type: 'booking_disputed',
+          title: 'Booking disputed',
+          body: `A learner disputed ${classTitle}. Payout is paused while this is reviewed.`,
+          payload: {
+            booking_id: saved.id,
+            session_id: saved.session?.id,
+            class_title: classTitle,
+            reason: saved.dispute_reason,
+          },
+        }),
+      );
+
+      await this.pushNotificationsService.sendToUser(saved.session.teacher.id, {
+        title: 'Booking disputed',
+        body: `A learner disputed ${classTitle}.`,
+        data: {
+          type: 'booking_disputed',
+          booking_id: saved.id,
+          session_id: saved.session?.id,
+          class_title: classTitle,
+        },
+      });
+    }
+
+    this.logger.warn(
+      `BOOKING_DISPUTED bookingId=${saved.id} learnerId=${learnerId} reason=${saved.dispute_reason ?? 'none'}`,
+    );
+
+    return saved;
+  }
+
+  @Cron('*/10 * * * *')
+  async autoCompleteEligibleBookings() {
+    const startedAt = Date.now();
+
+    this.logger.log('BOOKING_AUTO_COMPLETE_CRON_STARTED');
+
+    try {
+      const bookings = await this.dataSource
+        .getRepository(Booking)
+        .createQueryBuilder('b')
+        .innerJoinAndSelect('b.session', 's')
+        .where('b.status = :confirmed', {
+          confirmed: BookingStatus.CONFIRMED,
+        })
+        .andWhere(`s.end_time <= (NOW() - INTERVAL '24 hours')`)
+        .orderBy('s.end_time', 'ASC')
+        .limit(50)
+        .getMany();
+
+      for (const booking of bookings) {
+        booking.status = BookingStatus.COMPLETED;
+        booking.completed_at = new Date();
+
+        await this.dataSource.getRepository(Booking).save(booking);
+
+        this.logger.log(
+          `BOOKING_AUTO_COMPLETED bookingId=${booking.id}`,
+        );
+      }
+
+      this.logger.log(
+        `BOOKING_AUTO_COMPLETE_CRON_COMPLETED count=${bookings.length} durationMs=${Date.now() - startedAt}`,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `BOOKING_AUTO_COMPLETE_CRON_FAILED message=${error?.message ?? 'unknown'}`,
+        error?.stack,
+      );
+    }
+  }
+
+  private async triggerRefundFlowForTeacherNoShow(
+    bookingId: string,
+  ): Promise<void> {
+    try {
+      const refund = await this.paymentsService.createRefundForBooking(
+        bookingId,
+      );
+
+      const current = await this.getBookingByIdForLifecycle(bookingId);
+
+      if (current.status === BookingStatus.TEACHER_NO_SHOW) {
+        await this.markBookingRefundPending(bookingId, {
+          sendEmail: true,
+        });
+      }
+
+      if (refund.status === 'succeeded') {
+        await this.markBookingRefunded({
+          bookingId,
+          refundAmount: refund.amount,
+          stripeRefundId: refund.id,
+          refundedAt: new Date(),
+        });
+      }
+
+      if (refund.status === 'failed' || refund.status === 'canceled') {
+        await this.markBookingRefundFailed({
+          bookingId,
+          stripeRefundId: refund.id,
+          failureReason: refund.failure_reason ?? refund.status,
+          nextRetryAt: new Date(Date.now() + 15 * 60 * 1000),
+          incrementRetryCount: true,
+        });
+      }
+
+      this.logger.log(
+        `BOOKING_TEACHER_NO_SHOW_REFUND_TRIGGERED bookingId=${bookingId} refundId=${refund.id} refundStatus=${refund.status}`,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `BOOKING_TEACHER_NO_SHOW_REFUND_FAILED bookingId=${bookingId} message=${error?.message ?? error}`,
+        error?.stack,
+      );
+    }
+  }
+
 async getMyBookings(userId: string) {
   this.logger.log(`BOOKINGS_GET_MY_BOOKINGS userId=${userId}`);
 
@@ -626,18 +955,29 @@ async getMyBookings(userId: string) {
       's.max_participants AS session_max_participants',
       's.rough_location AS session_rough_location',
 
+      'b.completed_at AS booking_completed_at',
+'b.disputed_at AS booking_disputed_at',
+'b.dispute_reason AS booking_dispute_reason',
+'b.learner_no_show_at AS booking_learner_no_show_at',
+'b.teacher_no_show_at AS booking_teacher_no_show_at',
+'b.lesson_amount AS booking_lesson_amount',
+'b.platform_fee_amount AS booking_platform_fee_amount',
+'b.stripe_fee_amount AS booking_stripe_fee_amount',
+'b.total_amount AS booking_total_amount',
+'b.teacher_payout_amount AS booking_teacher_payout_amount',
+
       `CASE
-        WHEN b.status = 'CONFIRMED' THEN ST_Y(s.location::geometry)
+        WHEN b.status IN ('CONFIRMED', 'COMPLETED', 'LEARNER_NO_SHOW', 'DISPUTED') THEN ST_Y(s.location::geometry)
         ELSE NULL
       END AS session_lat`,
 
       `CASE
-        WHEN b.status = 'CONFIRMED' THEN ST_X(s.location::geometry)
+        WHEN b.status IN ('CONFIRMED', 'COMPLETED', 'LEARNER_NO_SHOW', 'DISPUTED') THEN ST_X(s.location::geometry)
         ELSE NULL
       END AS session_lng`,
 
       `CASE
-        WHEN b.status = 'CONFIRMED' THEN s.arrival_instructions
+        WHEN b.status IN ('CONFIRMED', 'COMPLETED', 'LEARNER_NO_SHOW', 'DISPUTED') THEN s.arrival_instructions
         ELSE NULL
       END AS session_arrival_instructions`,
 
@@ -1128,8 +1468,18 @@ private getSessionLng(session: any): number | null {
       refunded_at: booking.refunded_at,
       refund_amount: booking.refund_amount,
       refund_failure_reason: booking.refund_failure_reason,
+      completed_at: booking.completed_at,
+disputed_at: booking.disputed_at,
+dispute_reason: booking.dispute_reason,
+learner_no_show_at: booking.learner_no_show_at,
+teacher_no_show_at: booking.teacher_no_show_at,
       paid_at: booking.paid_at,
-      amount: booking.amount,
+amount: booking.amount,
+lesson_amount: booking.lesson_amount,
+platform_fee_amount: booking.platform_fee_amount,
+stripe_fee_amount: booking.stripe_fee_amount,
+total_amount: booking.total_amount,
+teacher_payout_amount: booking.teacher_payout_amount,
       currency: booking.currency,
       session: booking.session
         ? {
@@ -1141,15 +1491,30 @@ private getSessionLng(session: any): number | null {
             max_participants: booking.session.max_participants,
 rough_location: booking.session.rough_location,
 arrival_instructions:
-  booking.status === BookingStatus.CONFIRMED
+  [
+  BookingStatus.CONFIRMED,
+  BookingStatus.COMPLETED,
+  BookingStatus.LEARNER_NO_SHOW,
+  BookingStatus.DISPUTED,
+].includes(booking.status)
     ? booking.session.arrival_instructions
     : null,
 session_lat:
-  booking.status === BookingStatus.CONFIRMED
+  [
+  BookingStatus.CONFIRMED,
+  BookingStatus.COMPLETED,
+  BookingStatus.LEARNER_NO_SHOW,
+  BookingStatus.DISPUTED,
+].includes(booking.status)
     ? this.getSessionLat(booking.session)
     : null,
 session_lng:
-  booking.status === BookingStatus.CONFIRMED
+  [
+  BookingStatus.CONFIRMED,
+  BookingStatus.COMPLETED,
+  BookingStatus.LEARNER_NO_SHOW,
+  BookingStatus.DISPUTED,
+].includes(booking.status)
     ? this.getSessionLng(booking.session)
     : null,
             session_type: booking.session.session_type ?? SessionType.GROUP,

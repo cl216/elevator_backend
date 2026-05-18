@@ -2,7 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import Stripe from 'stripe';
 import { DataSource } from 'typeorm';
-import { Booking, PayoutStatus } from '../bookings/entities/booking.entity';
+import {
+  Booking,
+  BookingStatus,
+  PayoutStatus,
+} from '../bookings/entities/booking.entity';
 
 @Injectable()
 export class PayoutsService {
@@ -14,7 +18,7 @@ export class PayoutsService {
 
   constructor(private readonly dataSource: DataSource) {}
 
-  @Cron('*/1 * * * *') // every minute
+  @Cron('*/1 * * * *')
   async runPayouts() {
     const startedAt = Date.now();
 
@@ -27,7 +31,12 @@ export class PayoutsService {
           .innerJoinAndSelect('b.session', 's')
           .innerJoinAndSelect('s.teacher', 't')
           .innerJoinAndSelect('t.teacherProfile', 'tp')
-          .where('b.status = :confirmed', { confirmed: 'CONFIRMED' })
+          .where('b.status IN (:...payableStatuses)', {
+            payableStatuses: [
+              BookingStatus.COMPLETED,
+              BookingStatus.LEARNER_NO_SHOW,
+            ],
+          })
           .andWhere('b.payout_status = :notPaid', {
             notPaid: PayoutStatus.NOT_PAID_OUT,
           })
@@ -74,8 +83,12 @@ export class PayoutsService {
       return;
     }
 
-    // Re-check invariants
-    if (booking.status !== 'CONFIRMED') {
+    const payableStatuses = [
+      BookingStatus.COMPLETED,
+      BookingStatus.LEARNER_NO_SHOW,
+    ];
+
+    if (!payableStatuses.includes(booking.status)) {
       this.logger.warn(
         `PAYOUT_ATTEMPT_SKIPPED_INVALID_STATUS bookingId=${booking.id} status=${booking.status}`,
       );
@@ -89,9 +102,14 @@ export class PayoutsService {
       return;
     }
 
-    if (!booking.amount || !booking.currency) {
+    const payoutAmount =
+      booking.teacher_payout_amount ??
+      booking.lesson_amount ??
+      booking.amount;
+
+    if (!payoutAmount || !booking.currency) {
       this.logger.warn(
-        `PAYOUT_ATTEMPT_SKIPPED_MISSING_AMOUNT_OR_CURRENCY bookingId=${booking.id} amount=${booking.amount} currency=${booking.currency}`,
+        `PAYOUT_ATTEMPT_SKIPPED_MISSING_AMOUNT_OR_CURRENCY bookingId=${booking.id} payoutAmount=${payoutAmount} currency=${booking.currency}`,
       );
       return;
     }
@@ -120,7 +138,7 @@ export class PayoutsService {
     try {
       const transfer = await this.stripe.transfers.create(
         {
-          amount: booking.amount,
+          amount: payoutAmount,
           currency: booking.currency,
           destination: teacherStripeAccountId,
           metadata: { bookingId: booking.id },
@@ -136,7 +154,7 @@ export class PayoutsService {
       await manager.save(booking);
 
       this.logger.log(
-        `PAYOUT_SUCCESS bookingId=${booking.id} transferId=${transfer.id} destinationAccount=${teacherStripeAccountId}`,
+        `PAYOUT_SUCCESS bookingId=${booking.id} transferId=${transfer.id} destinationAccount=${teacherStripeAccountId} amount=${payoutAmount}`,
       );
     } catch (e: any) {
       booking.payout_status = PayoutStatus.PAYOUT_FAILED;
