@@ -15,11 +15,21 @@ import { PrivateSessionRequest } from './private-lessons/entities/private-lesson
 
 const dataSource = new DataSource({
   type: 'postgres',
-  host: process.env.DB_HOST ?? 'localhost',
-  port: parseInt(process.env.DB_PORT ?? '5432', 10),
-  username: process.env.DB_USER ?? 'classes_user',
-  password: process.env.DB_PASS ?? 'classes_pass',
-  database: process.env.DB_NAME ?? 'classes',
+  ...(process.env.DATABASE_URL
+    ? {
+        url: process.env.DATABASE_URL,
+        ssl:
+          process.env.NODE_ENV === 'production'
+            ? { rejectUnauthorized: false }
+            : false,
+      }
+    : {
+        host: process.env.DB_HOST ?? 'localhost',
+        port: parseInt(process.env.DB_PORT ?? '5432', 10),
+        username: process.env.DB_USER ?? 'classes_user',
+        password: process.env.DB_PASS ?? 'classes_pass',
+        database: process.env.DB_NAME ?? 'classes',
+      }),
 
   entities: [
     User,

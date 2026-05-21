@@ -6,6 +6,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from "@nestjs/common";
+import type { Express } from "express";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { diskStorage } from "multer";
 import { extname } from "path";
@@ -41,8 +42,6 @@ export class UploadsController {
     if (!file) {
       throw new BadRequestException("Image file is required");
     }
-
-    const baseUrl = process.env.API_PUBLIC_URL || "http://localhost:3000";
 
     return {
       url: `/uploads/${file.filename}`,

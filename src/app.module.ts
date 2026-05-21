@@ -6,9 +6,9 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AdminModule } from './admin/admin.module';
-import { ServeStaticModule } from "@nestjs/serve-static";
-import { join } from "path";
-import { UploadsModule } from "./uploads/uploads.module";
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
+import { UploadsModule } from './uploads/uploads.module';
 
 import { CategoriesModule } from './categories/categories.module';
 import { ClassRequestsModule } from './class-requests/class-requests.module';
@@ -27,28 +27,35 @@ import { PrivateSessionRequestsModule } from './private-lessons/private-lessons.
 
 @Module({
   imports: [
-
     ServeStaticModule.forRoot({
-  rootPath: join(process.cwd(), "uploads"),
-  serveRoot: "/uploads",
-}),
-UploadsModule,
+      rootPath: join(process.cwd(), 'uploads'),
+      serveRoot: '/uploads',
+    }),
+
+    UploadsModule,
 
     ConfigModule.forRoot({
       isGlobal: true,
       validationSchema: Joi.object({
-        DATABASE_URL: Joi.string().uri().required(),
+        DATABASE_URL: Joi.string().required(),
+
         JWT_SECRET: Joi.string().min(16).required(),
         JWT_EXPIRES_IN: Joi.string().required(),
+
         STRIPE_SECRET_KEY: Joi.string().required(),
-        STRIPE_WEBHOOK_SECRET: Joi.string().required(),
+        STRIPE_WEBHOOK_SECRET: Joi.string().allow('').optional(),
         STRIPE_PUBLISHABLE_KEY: Joi.string().required(),
+
         STRIPE_CONNECT_REFRESH_URL: Joi.string().uri().required(),
         STRIPE_CONNECT_RETURN_URL: Joi.string().uri().required(),
+
         APP_URL: Joi.string().uri().required(),
-        CHECKOUT_SUCCESS_URL: Joi.string().uri().required(),
-        CHECKOUT_CANCEL_URL: Joi.string().uri().required(),
+
+        CHECKOUT_SUCCESS_URL: Joi.string().required(),
+        CHECKOUT_CANCEL_URL: Joi.string().required(),
+
         PAYMENTS_CURRENCY: Joi.string().length(3).required(),
+
         DB_HOST: Joi.string().optional(),
         DB_PORT: Joi.number().optional(),
         DB_USER: Joi.string().optional(),
@@ -62,7 +69,17 @@ UploadsModule,
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
+
+      ssl:
+        process.env.NODE_ENV === 'production'
+          ? { rejectUnauthorized: false }
+          : false,
+
       autoLoadEntities: true,
+
+      // TEMPORARY:
+      // Use true once to create schema on empty Render DB.
+      // Change back to false immediately after startup succeeds.
       synchronize: false,
     }),
 
@@ -87,8 +104,9 @@ UploadsModule,
     CategoriesModule,
     NotificationsModule,
     PrivateSessionRequestsModule,
-AdminModule,
+    AdminModule,
   ],
+
   providers: [
     {
       provide: APP_GUARD,
