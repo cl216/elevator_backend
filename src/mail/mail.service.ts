@@ -20,8 +20,7 @@ export class MailService {
       throw new InternalServerErrorException('APP_BASE_URL is not configured');
     }
 
-const verifyUrl =
-  `https://elevatorapp.org/verify-email?token=${encodeURIComponent(token)}`;    const { error } = await this.resend.emails.send({
+const verifyUrl = `elevator://verify-email?token=${encodeURIComponent(token)}`;  const { error } = await this.resend.emails.send({
       from: this.fromEmail,
       to,
       subject: 'Verify your Elevator account',
@@ -53,9 +52,7 @@ const verifyUrl =
       throw new InternalServerErrorException('APP_BASE_URL is not configured');
     }
 
-const resetUrl =
-  `https://elevatorapp.org/reset-password?token=${encodeURIComponent(token)}`;
-
+const resetUrl = `elevator://reset-password?token=${encodeURIComponent(token)}`;
     const { error } = await this.resend.emails.send({
       from: this.fromEmail,
       to,
@@ -64,8 +61,10 @@ const resetUrl =
         <div>
           <h2>Reset your password</h2>
           <p>Click the link below to reset your password.</p>
-          <p><a href="${resetUrl}">Reset password</a></p>
+          <p>  <a href="${resetUrl}">Reset password</a></p>
           <p>This link should expire in 30 minutes.</p>
+          <p>If the button does not work, copy and paste this link into your phone browser:</p>
+<p>${resetUrl}</p>
           <p>If you did not request this, you can ignore this email.</p>
         </div>
       `,
