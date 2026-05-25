@@ -20,8 +20,8 @@ export class MailService {
       throw new InternalServerErrorException('APP_BASE_URL is not configured');
     }
 
-const verifyUrl = `elevator://verify-email?token=${encodeURIComponent(token)}`;
-    const { error } = await this.resend.emails.send({
+const verifyUrl =
+  `https://elevatorapp.org/verify-email?token=${encodeURIComponent(token)}`;    const { error } = await this.resend.emails.send({
       from: this.fromEmail,
       to,
       subject: 'Verify your Elevator account',
@@ -53,7 +53,8 @@ const verifyUrl = `elevator://verify-email?token=${encodeURIComponent(token)}`;
       throw new InternalServerErrorException('APP_BASE_URL is not configured');
     }
 
-const resetUrl = `elevator://reset-password?token=${encodeURIComponent(token)}`;
+const resetUrl =
+  `https://elevatorapp.org/reset-password?token=${encodeURIComponent(token)}`;
 
     const { error } = await this.resend.emails.send({
       from: this.fromEmail,
