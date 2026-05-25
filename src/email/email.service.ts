@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
-import { EMAIL_FROM } from './email.constants';
 import { SendEmailOptions } from './email.types';
 
 @Injectable()
@@ -31,8 +30,9 @@ export class EmailService {
     }
 
     const { error } = await this.resend.emails.send({
-      from: EMAIL_FROM,
-      to: options.to,
+from:
+  this.configService.get<string>('EMAIL_FROM') ??
+  'Elevator <noreply@elevatorapp.org>',      to: options.to,
       subject: options.subject,
       html: options.html,
       text: options.text,
