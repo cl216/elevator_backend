@@ -411,142 +411,144 @@ export class AuthService {
     return { success: true };
   }
 
-  async forgotPassword(dto: ForgotPasswordDto) {
-    const normalizedEmail = dto.email.toLowerCase().trim();
+async forgotPassword(dto: ForgotPasswordDto) {
+  const normalizedEmail = dto.email.toLowerCase().trim();
 
-    this.logger.log(`AUTH_FORGOT_PASSWORD_ATTEMPT email=${normalizedEmail}`);
+  this.logger.log(`AUTH_FORGOT_PASSWORD_ATTEMPT email=${normalizedEmail}`);
 
-    const user = await this.userRepository.findOne({
-      where: { email: normalizedEmail },
-    });
+  const user = await this.userRepository.findOne({
+    where: { email: normalizedEmail },
+  });
 
-    if (!user) {
-      this.logger.warn(
-        `AUTH_FORGOT_PASSWORD_NO_USER email=${normalizedEmail}`,
-      );
+  const genericMessage =
+    'If an account exists for that email, a reset code has been sent.';
 
-      return {
-        message:
-          'If an account exists for that email, a reset link has been sent.',
-      };
-    }
+  if (!user) {
+    this.logger.warn(
+      `AUTH_FORGOT_PASSWORD_NO_USER email=${normalizedEmail}`,
+    );
 
-    const rawToken = randomBytes(32).toString('hex');
-    const hashedToken = createHash('sha256').update(rawToken).digest('hex');
-    const expiresAt = new Date(Date.now() + 1000 * 60 * 30);
-
-    user.password_reset_token = hashedToken;
-    user.password_reset_expires_at = expiresAt;
-    await this.userRepository.save(user);
-
-    await this.mailService.sendPasswordResetEmail(user.email, rawToken);
-
-    this.logger.log(`AUTH_FORGOT_PASSWORD_SUCCESS userId=${user.id}`);
-
-    return {
-      message:
-        'If an account exists for that email, a reset link has been sent.',
-      ...this.buildDevResetPayload(rawToken),
-    };
+    return { message: genericMessage };
   }
 
-  async resetPassword(dto: ResetPasswordDto) {
-    const rawToken = dto.token.trim();
-    const hashedToken = createHash('sha256').update(rawToken).digest('hex');
+  const resetCode = String(Math.floor(100000 + Math.random() * 900000));
+  const hashedCode = createHash('sha256').update(resetCode).digest('hex');
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 15);
 
-    this.logger.log(`AUTH_RESET_PASSWORD_ATTEMPT`);
+  user.password_reset_token = hashedCode;
+  user.password_reset_expires_at = expiresAt;
+  await this.userRepository.save(user);
 
-    const user = await this.userRepository.findOne({
-      where: { password_reset_token: hashedToken },
-    });
+  await this.mailService.sendPasswordResetEmail(user.email, resetCode);
 
-    if (!user) {
-      this.logger.warn(`AUTH_RESET_PASSWORD_INVALID_TOKEN`);
-      throw new BadRequestException('Invalid or expired reset token');
-    }
+  this.logger.log(`AUTH_FORGOT_PASSWORD_SUCCESS userId=${user.id}`);
 
-    if (
-      !user.password_reset_expires_at ||
-      user.password_reset_expires_at.getTime() < Date.now()
-    ) {
-      this.logger.warn(`AUTH_RESET_PASSWORD_EXPIRED_TOKEN userId=${user.id}`);
-      throw new BadRequestException('Invalid or expired reset token');
-    }
+  return {
+    message: genericMessage,
+  };
+}
 
-    const hashedPassword = await bcrypt.hash(dto.new_password, 10);
+async resetPassword(dto: ResetPasswordDto) {
+  const normalizedEmail = dto.email.toLowerCase().trim();
+  const rawCode = dto.code.trim();
 
-    user.password_hash = hashedPassword;
-    user.password_reset_token = null;
-    user.password_reset_expires_at = null;
-    user.refresh_token_hash = null;
-    user.refresh_token_expires_at = null;
+  const hashedCode = createHash('sha256').update(rawCode).digest('hex');
 
-    await this.userRepository.save(user);
+  this.logger.log(`AUTH_RESET_PASSWORD_ATTEMPT email=${normalizedEmail}`);
 
-    this.logger.log(`AUTH_RESET_PASSWORD_SUCCESS userId=${user.id}`);
+  const user = await this.userRepository.findOne({
+    where: {
+      email: normalizedEmail,
+      password_reset_token: hashedCode,
+    },
+  });
 
-    return {
-      message: 'Password reset successfully',
-    };
+  if (!user) {
+    this.logger.warn(`AUTH_RESET_PASSWORD_INVALID_CODE email=${normalizedEmail}`);
+    throw new BadRequestException('Invalid or expired reset code');
   }
 
-  async sendVerification(dto: SendVerificationDto) {
-    const normalizedEmail = dto.email.toLowerCase().trim();
+  if (
+    !user.password_reset_expires_at ||
+    user.password_reset_expires_at.getTime() < Date.now()
+  ) {
+    this.logger.warn(`AUTH_RESET_PASSWORD_EXPIRED_CODE userId=${user.id}`);
+    throw new BadRequestException('Invalid or expired reset code');
+  }
 
-    this.logger.log(`AUTH_SEND_VERIFICATION_ATTEMPT email=${normalizedEmail}`);
+  const hashedPassword = await bcrypt.hash(dto.new_password, 10);
 
-    const user = await this.userRepository.findOne({
-      where: { email: normalizedEmail },
-    });
+  user.password_hash = hashedPassword;
+  user.password_reset_token = null;
+  user.password_reset_expires_at = null;
+  user.refresh_token_hash = null;
+  user.refresh_token_expires_at = null;
 
-    if (!user) {
-      this.logger.warn(
-        `AUTH_SEND_VERIFICATION_NO_USER email=${normalizedEmail}`,
-      );
+  await this.userRepository.save(user);
 
-      return {
-        message:
-          'If an account exists for that email, a verification link has been sent.',
-      };
-    }
+  this.logger.log(`AUTH_RESET_PASSWORD_SUCCESS userId=${user.id}`);
 
-    if (!this.isProduction) {
-      if (!user.email_verified_at) {
-        user.email_verified_at = new Date();
-        user.email_verification_token = null;
-        user.email_verification_expires_at = null;
-        await this.userRepository.save(user);
-      }
+  return {
+    message: 'Password reset successfully',
+  };
+}
+async sendVerification(dto: SendVerificationDto) {
+  const normalizedEmail = dto.email.toLowerCase().trim();
 
-      return {
-        message: 'Email auto-verified in development mode.',
-      };
-    }
+  this.logger.log(`AUTH_SEND_VERIFICATION_ATTEMPT email=${normalizedEmail}`);
 
-    if (user.email_verified_at) {
-      return {
-        message: 'Email is already verified.',
-      };
-    }
+  const user = await this.userRepository.findOne({
+    where: { email: normalizedEmail },
+  });
 
-    const rawToken = randomBytes(32).toString('hex');
-    const hashedToken = createHash('sha256').update(rawToken).digest('hex');
-    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24);
-
-    user.email_verification_token = hashedToken;
-    user.email_verification_expires_at = expiresAt;
-    await this.userRepository.save(user);
-
-    await this.mailService.sendVerificationEmail(user.email, rawToken);
-
-    this.logger.log(`AUTH_SEND_VERIFICATION_SUCCESS userId=${user.id}`);
+  if (!user) {
+    this.logger.warn(
+      `AUTH_SEND_VERIFICATION_NO_USER email=${normalizedEmail}`,
+    );
 
     return {
       message:
         'If an account exists for that email, a verification link has been sent.',
-      ...this.buildDevVerificationPayload(rawToken),
     };
   }
+
+  if (!this.isProduction) {
+    if (!user.email_verified_at) {
+      user.email_verified_at = new Date();
+      user.email_verification_token = null;
+      user.email_verification_expires_at = null;
+      await this.userRepository.save(user);
+    }
+
+    return {
+      message: 'Email auto-verified in development mode.',
+    };
+  }
+
+  if (user.email_verified_at) {
+    return {
+      message: 'Email is already verified.',
+    };
+  }
+
+  const rawToken = randomBytes(32).toString('hex');
+  const hashedToken = createHash('sha256').update(rawToken).digest('hex');
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24);
+
+  user.email_verification_token = hashedToken;
+  user.email_verification_expires_at = expiresAt;
+  await this.userRepository.save(user);
+
+  await this.mailService.sendVerificationEmail(user.email, rawToken);
+
+  this.logger.log(`AUTH_SEND_VERIFICATION_SUCCESS userId=${user.id}`);
+
+  return {
+    message:
+      'If an account exists for that email, a verification link has been sent.',
+    ...this.buildDevVerificationPayload(rawToken),
+  };
+}
 
   async verifyEmail(dto: VerifyEmailDto) {
     if (!this.isProduction) {

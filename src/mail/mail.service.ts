@@ -46,39 +46,35 @@ const verifyUrl = `elevator://verify-email?token=${encodeURIComponent(token)}`; 
     this.logger.log(`MAIL_VERIFY_SENT to=${to}`);
   }
 
-  async sendPasswordResetEmail(to: string, token: string) {
-    const appBaseUrl = process.env.APP_BASE_URL;
-    if (!appBaseUrl) {
-      throw new InternalServerErrorException('APP_BASE_URL is not configured');
-    }
+async sendPasswordResetEmail(to: string, code: string) {
+  const { error } = await this.resend.emails.send({
+    from: this.fromEmail,
+    to,
+    subject: 'Your Elevator password reset code',
+    html: `
+      <div>
+        <h2>Reset your password</h2>
+        <p>Use this code in the Elevator app to reset your password:</p>
 
-const resetUrl = `elevator://reset-password?token=${encodeURIComponent(token)}`;
-    const { error } = await this.resend.emails.send({
-      from: this.fromEmail,
-      to,
-      subject: 'Reset your Elevator password',
-      html: `
-        <div>
-          <h2>Reset your password</h2>
-          <p>Click the link below to reset your password.</p>
-          <p>  <a href="${resetUrl}">Reset password</a></p>
-          <p>This link should expire in 30 minutes.</p>
-          <p>If the button does not work, copy and paste this link into your phone browser:</p>
-<p>${resetUrl}</p>
-          <p>If you did not request this, you can ignore this email.</p>
-        </div>
-      `,
-    });
+        <p style="font-size: 28px; font-weight: bold; letter-spacing: 4px;">
+          ${code}
+        </p>
 
-    if (error) {
-      this.logger.error(
-        `MAIL_RESET_SEND_FAILED to=${to} from=${this.fromEmail} error=${JSON.stringify(error)}`
-      );
-      throw new InternalServerErrorException(
-        `Failed to send password reset email: ${error.message ?? 'unknown mail error'}`
-      );
-    }
+        <p>This code expires in 15 minutes.</p>
+        <p>If you did not request this, you can ignore this email.</p>
+      </div>
+    `,
+  });
 
-    this.logger.log(`MAIL_RESET_SENT to=${to}`);
+  if (error) {
+    this.logger.error(
+      `MAIL_RESET_SEND_FAILED to=${to} from=${this.fromEmail} error=${JSON.stringify(error)}`
+    );
+    throw new InternalServerErrorException(
+      `Failed to send password reset email: ${error.message ?? 'unknown mail error'}`
+    );
   }
+
+  this.logger.log(`MAIL_RESET_SENT to=${to}`);
+}
 }
