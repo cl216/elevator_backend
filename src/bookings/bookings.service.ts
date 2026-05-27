@@ -152,6 +152,7 @@ booking.teacher_payout_amount = null;
 booking.completed_at = null;
 booking.disputed_at = null;
 booking.dispute_reason = null;
+booking.dispute_comment = null;
 booking.learner_no_show_at = null;
 booking.teacher_no_show_at = null;
 
@@ -615,8 +616,11 @@ booking.status !== BookingStatus.REFUND_FAILED
     return saved;
   }
 
-    async markLearnerNoShow(bookingId: string, teacherId: string) {
-    const booking = await this.getBookingByIdForLifecycle(bookingId);
+async markLearnerNoShow(
+  bookingId: string,
+  teacherId: string,
+  comment?: string,
+) {    const booking = await this.getBookingByIdForLifecycle(bookingId);
 
     if (booking.session?.teacher?.id !== teacherId) {
       throw new ForbiddenException(
@@ -643,11 +647,19 @@ booking.status !== BookingStatus.REFUND_FAILED
         'You can only mark learner no-show after the session has started',
       );
     }
+const noShowDeadline = sessionStart.getTime() + 24 * 60 * 60 * 1000;
+
+if (Date.now() > noShowDeadline) {
+  throw new BadRequestException(
+    'No-show reports must be submitted within 24 hours of the session start time',
+  );
+}
 
 booking.status = BookingStatus.DISPUTED;
 booking.learner_no_show_at = new Date();
 booking.disputed_at = new Date();
 booking.dispute_reason = 'learner_no_show_reported';
+booking.dispute_comment = comment?.trim().slice(0, 200) || null;
 
     const saved = await this.dataSource.getRepository(Booking).save(booking);
 
@@ -685,8 +697,11 @@ booking.dispute_reason = 'learner_no_show_reported';
     return saved;
   }
 
-  async markTeacherNoShow(bookingId: string, learnerId: string) {
-    const booking = await this.getBookingByIdForLifecycle(bookingId);
+async markTeacherNoShow(
+  bookingId: string,
+  learnerId: string,
+  comment?: string,
+) {    const booking = await this.getBookingByIdForLifecycle(bookingId);
 
     if (booking.user.id !== learnerId) {
       throw new ForbiddenException('Not your booking');
@@ -711,11 +726,19 @@ booking.dispute_reason = 'learner_no_show_reported';
         'You can only report teacher no-show after the session has started',
       );
     }
+const noShowDeadline = sessionStart.getTime() + 24 * 60 * 60 * 1000;
+
+if (Date.now() > noShowDeadline) {
+  throw new BadRequestException(
+    'No-show reports must be submitted within 24 hours of the session start time',
+  );
+}
 
 booking.status = BookingStatus.DISPUTED;
 booking.teacher_no_show_at = new Date();
 booking.disputed_at = new Date();
 booking.dispute_reason = 'teacher_no_show_reported';
+booking.dispute_comment = comment?.trim().slice(0, 200) || null;
 
     const saved = await this.dataSource.getRepository(Booking).save(booking);
 
@@ -958,6 +981,7 @@ async getMyBookings(userId: string) {
       'b.completed_at AS booking_completed_at',
 'b.disputed_at AS booking_disputed_at',
 'b.dispute_reason AS booking_dispute_reason',
+'b.dispute_comment AS booking_dispute_comment',
 'b.learner_no_show_at AS booking_learner_no_show_at',
 'b.teacher_no_show_at AS booking_teacher_no_show_at',
 'b.lesson_amount AS booking_lesson_amount',
@@ -1471,6 +1495,7 @@ private getSessionLng(session: any): number | null {
       completed_at: booking.completed_at,
 disputed_at: booking.disputed_at,
 dispute_reason: booking.dispute_reason,
+dispute_comment: booking.dispute_comment,
 learner_no_show_at: booking.learner_no_show_at,
 teacher_no_show_at: booking.teacher_no_show_at,
       paid_at: booking.paid_at,

@@ -108,13 +108,15 @@ export class SessionsService {
       query.andWhere('session.id != :excludeSessionId', { excludeSessionId });
     }
 
-    const overlappingSession = await query.getOne();
+const overlappingSession = await query
+  .leftJoinAndSelect("session.class", "class")
+  .getOne();
 
-    if (overlappingSession) {
-      throw new BadRequestException(
-        'You already have another session that overlaps with this time.',
-      );
-    }
+if (overlappingSession) {
+  throw new BadRequestException(
+    `This overlaps with "${overlappingSession.class?.title ?? "another session"}" at ${overlappingSession.start_time}.`,
+  );
+}
   }
 
   async approveSessionForReview(sessionId: string) {

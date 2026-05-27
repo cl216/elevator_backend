@@ -194,6 +194,9 @@ export class Booking {
   @Column({ type: 'text', nullable: true })
   dispute_reason: string | null;
 
+  @Column({ type: 'text', nullable: true })
+dispute_comment: string | null;
+
   @Column({ type: 'timestamp', nullable: true })
   learner_no_show_at: Date | null;
 
