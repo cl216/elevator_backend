@@ -68,27 +68,36 @@ export class BookingsController {
    * No automatic refund.
    * Booking can still be paid out later.
    */
-  @Post(':bookingId/no-show/learner')
-  @HttpCode(HttpStatus.OK)
-  markLearnerNoShow(
-    @CurrentUser() user: { id: string },
-    @Param('bookingId') bookingId: string,
-  ) {
-    return this.bookingsService.markLearnerNoShow(bookingId, user.id);
-  }
-
+@Post(':bookingId/no-show/learner')
+@HttpCode(HttpStatus.OK)
+markLearnerNoShow(
+  @CurrentUser() user: { id: string },
+  @Param('bookingId') bookingId: string,
+  @Body() body: { comment?: string },
+) {
+  return this.bookingsService.markLearnerNoShow(
+    bookingId,
+    user.id,
+    body?.comment,
+  );
+}
   /**
    * Learner reports that teacher did not show.
    * Starts refund flow.
    */
-  @Post(':bookingId/no-show/teacher')
-  @HttpCode(HttpStatus.OK)
-  markTeacherNoShow(
-    @CurrentUser() user: { id: string },
-    @Param('bookingId') bookingId: string,
-  ) {
-    return this.bookingsService.markTeacherNoShow(bookingId, user.id);
-  }
+@Post(':bookingId/no-show/teacher')
+@HttpCode(HttpStatus.OK)
+markTeacherNoShow(
+  @CurrentUser() user: { id: string },
+  @Param('bookingId') bookingId: string,
+  @Body() body: { comment?: string },
+) {
+  return this.bookingsService.markTeacherNoShow(
+    bookingId,
+    user.id,
+    body?.comment,
+  );
+}
 
   /**
    * Learner disputes a completed/confirmed booking.

@@ -63,11 +63,11 @@ export function SessionReminder24hEmail(
             ) : null}
           </Section>
 
-          <Section style={{ textAlign: 'center', marginTop: '24px' }}>
+          {/* <Section style={{ textAlign: 'center', marginTop: '24px' }}>
             <Button style={button} href={bookingUrl}>
               View booking
             </Button>
-          </Section>
+          </Section> */}
 
           <Hr style={hr} />
 

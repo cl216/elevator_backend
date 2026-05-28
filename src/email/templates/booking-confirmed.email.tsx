@@ -45,9 +45,9 @@ export function BookingConfirmedEmail(props: BookingConfirmedEmailProps) {
         </Text>
       </Section>
 
-      <Section style={{ marginTop: '24px', marginBottom: '24px' }}>
+      {/* <Section style={{ marginTop: '24px', marginBottom: '24px' }}>
         <EmailButton href={bookingUrl}>View booking</EmailButton>
-      </Section>
+      </Section> */}
 
       <Text>Thanks for booking with Elevator.</Text>
     </AppEmailLayout>
