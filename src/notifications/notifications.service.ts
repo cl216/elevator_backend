@@ -33,6 +33,37 @@ export class NotificationsService {
     return this.notificationsRepository.save(notification);
   }
 
+  async createAndPush(
+pushNotificationsService: {
+  sendToUser: (
+    userId: string,
+    payload: {
+      title: string;
+      body: string;
+      data?: Record<string, any>;
+    },
+  ) => Promise<void>;
+},  input: {
+    user_id: string;
+    type: string;
+    title: string;
+    body: string;
+    payload?: any;
+  },
+) {
+  const notification = await this.create(input);
+
+  await pushNotificationsService.sendToUser(input.user_id, {
+    title: input.title,
+    body: input.body,
+    data: {
+      type: input.type,
+      ...(input.payload ?? {}),
+    },
+  });
+
+  return notification;
+}
   async getForUser(userId: string) {
     return this.notificationsRepository.find({
       where: { user_id: userId },

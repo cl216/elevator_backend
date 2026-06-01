@@ -33,8 +33,9 @@ export class PayoutsService {
           .innerJoinAndSelect('t.teacherProfile', 'tp')
           .where('b.status IN (:...payableStatuses)', {
             payableStatuses: [
-              BookingStatus.COMPLETED,
-              BookingStatus.LEARNER_NO_SHOW,
+BookingStatus.COMPLETED,
+BookingStatus.LEARNER_NO_SHOW,
+BookingStatus.LATE_CANCELLED_BY_LEARNER,
             ],
           })
           .andWhere('b.payout_status = :notPaid', {
@@ -84,8 +85,9 @@ export class PayoutsService {
     }
 
     const payableStatuses = [
-      BookingStatus.COMPLETED,
-      BookingStatus.LEARNER_NO_SHOW,
+BookingStatus.COMPLETED,
+BookingStatus.LEARNER_NO_SHOW,
+BookingStatus.LATE_CANCELLED_BY_LEARNER,
     ];
 
     if (!payableStatuses.includes(booking.status)) {

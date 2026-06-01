@@ -306,48 +306,48 @@ booking.teacher_no_show_at = null;
     return booking as BookingWithRelations;
   }
 
-  async markBookingConfirmed(params: {
-    bookingId: string;
-    stripePaymentIntentId?: string | null;
-    stripeCheckoutSessionId?: string | null;
-    paidAt?: Date;
-  }) {
-    const {
-      bookingId,
-      stripePaymentIntentId,
-      stripeCheckoutSessionId,
-      paidAt,
-    } = params;
+async markBookingConfirmed(params: {
+  bookingId: string;
+  stripePaymentIntentId?: string | null;
+  stripeCheckoutSessionId?: string | null;
+  paidAt?: Date;
+}) {
+  const {
+    bookingId,
+    stripePaymentIntentId,
+    stripeCheckoutSessionId,
+    paidAt,
+  } = params;
 
-    const booking = await this.getBookingByIdForLifecycle(bookingId);
+  const booking = await this.getBookingByIdForLifecycle(bookingId);
 
-    if (booking.status !== BookingStatus.PENDING) {
-      this.logger.log(
-        `BOOKING_CONFIRM_NOOP bookingId=${booking.id} status=${booking.status}`,
-      );
-      return booking;
-    }
-
-    booking.status = BookingStatus.CONFIRMED;
-    booking.confirmed_at = new Date();
-    booking.paid_at = paidAt ?? booking.paid_at ?? new Date();
-
-    if (typeof stripePaymentIntentId === 'string') {
-      booking.stripe_payment_intent_id = stripePaymentIntentId;
-    }
-
-    if (typeof stripeCheckoutSessionId === 'string') {
-      booking.stripe_checkout_session_id = stripeCheckoutSessionId;
-    }
-
-    const saved = await this.dataSource.getRepository(Booking).save(booking);
-
-    this.logger.log(`BOOKING_CONFIRM_SUCCESS bookingId=${saved.id}`);
-
-    await this.sendBookingConfirmedEmail(saved);
-
-    return saved;
+  if (booking.status !== BookingStatus.PENDING) {
+    this.logger.log(
+      `BOOKING_CONFIRM_NOOP bookingId=${booking.id} status=${booking.status}`,
+    );
+    return booking;
   }
+
+  booking.status = BookingStatus.CONFIRMED;
+  booking.confirmed_at = new Date();
+  booking.paid_at = paidAt ?? booking.paid_at ?? new Date();
+
+  if (typeof stripePaymentIntentId === 'string') {
+    booking.stripe_payment_intent_id = stripePaymentIntentId;
+  }
+
+  if (typeof stripeCheckoutSessionId === 'string') {
+    booking.stripe_checkout_session_id = stripeCheckoutSessionId;
+  }
+
+  const saved = await this.dataSource.getRepository(Booking).save(booking);
+
+  this.logger.log(`BOOKING_CONFIRM_SUCCESS bookingId=${saved.id}`);
+
+  await this.sendBookingConfirmedEmail(saved);
+
+  return saved;
+}
 
  async cancelBookingByLearner(bookingId: string, learnerId: string) {
   const booking = await this.getBookingByIdForLifecycle(bookingId);
@@ -367,8 +367,23 @@ booking.teacher_no_show_at = null;
 
   const wasConfirmed = booking.status === BookingStatus.CONFIRMED;
 
-  booking.status = BookingStatus.CANCELLED_BY_LEARNER;
-  booking.cancelled_at = new Date();
+const sessionStart = booking.session?.start_time
+  ? new Date(booking.session.start_time)
+  : null;
+
+const hoursUntilSession =
+  sessionStart && !Number.isNaN(sessionStart.getTime())
+    ? (sessionStart.getTime() - Date.now()) / (1000 * 60 * 60)
+    : null;
+
+const isLateCancellation =
+  wasConfirmed &&
+  hoursUntilSession !== null &&
+  hoursUntilSession < 12;
+
+booking.status = isLateCancellation
+  ? BookingStatus.LATE_CANCELLED_BY_LEARNER
+  : BookingStatus.CANCELLED_BY_LEARNER;  booking.cancelled_at = new Date();
   booking.cancelled_by_user_id = learnerId;
 
   const saved = await this.dataSource.getRepository(Booking).save(booking);
@@ -393,11 +408,25 @@ booking.teacher_no_show_at = null;
       }),
     );
 
-    await this.pushNotificationsService.sendToUser(saved.session.teacher.id, {
-      title: 'Booking cancelled',
-      body: wasConfirmed
-        ? `A learner cancelled their booking for ${classTitle}.`
-        : `A learner cancelled their pending booking for ${classTitle}.`,
+const learnerName = this.getFirstName(saved.user);
+const sessionStart = saved.session?.start_time
+  ? new Date(saved.session.start_time)
+  : null;
+
+const hoursUntilSession =
+  sessionStart && !Number.isNaN(sessionStart.getTime())
+    ? (sessionStart.getTime() - Date.now()) / (1000 * 60 * 60)
+    : null;
+
+const cancellationBody = !wasConfirmed
+  ? `${learnerName} cancelled their pending booking for ${classTitle}.`
+  : hoursUntilSession !== null && hoursUntilSession < 12
+    ? `${learnerName} cancelled ${classTitle} less than 12 hours before start. No automatic refund applies under the current policy.`
+    : `${learnerName} cancelled ${classTitle}. An automatic refund may apply.`;
+
+await this.pushNotificationsService.sendToUser(saved.session.teacher.id, {
+  title: 'Booking cancelled',
+  body: cancellationBody,
       data: {
         type: 'booking_cancelled_by_learner',
         booking_id: saved.id,
@@ -412,7 +441,7 @@ booking.teacher_no_show_at = null;
     `BOOKING_CANCELLED_BY_LEARNER bookingId=${saved.id} learnerId=${learnerId} wasConfirmed=${wasConfirmed}`,
   );
 
-if (wasConfirmed) {
+if (wasConfirmed && !isLateCancellation) {
   await this.triggerRefundFlowForCancelledBooking(saved.id);
 }
 
@@ -1325,6 +1354,9 @@ async getMyBookings(userId: string) {
       case BookingStatus.CANCELLED_BY_LEARNER:
         return 'You already cancelled this session and it cannot be booked again.';
 
+        case BookingStatus.LATE_CANCELLED_BY_LEARNER:
+  return 'You cancelled this session late and it cannot be booked again.';
+  
       case BookingStatus.REFUND_PENDING:
       case BookingStatus.REFUNDED:
       case BookingStatus.REFUND_FAILED:
