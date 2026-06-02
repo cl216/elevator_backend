@@ -7,7 +7,7 @@ import { User } from '../users/user.entity';
 import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { MailModule } from '../mail/mail.module';
-
+import { TeacherProfile } from "../teacher/entities/teacher-profile.entity";
 const JWT_SECRET = process.env.JWT_SECRET!;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
 
@@ -15,8 +15,8 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
   imports: [
     UsersModule,
     MailModule,
-    TypeOrmModule.forFeature([User]),
-    JwtModule.register({
+    TypeOrmModule.forFeature([User, TeacherProfile])
+    , JwtModule.register({
       secret: JWT_SECRET,
       signOptions: { expiresIn: JWT_EXPIRES_IN as any },
     }),
@@ -25,4 +25,4 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
   providers: [AuthService, JwtStrategy],
   exports: [JwtStrategy, JwtModule, AuthService],
 })
-export class AuthModule {}
+export class AuthModule { }
