@@ -3,7 +3,9 @@ import {
   Controller,
   Get,
   Post,
+  Delete, 
   UseGuards,
+  Param,
   BadRequestException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
@@ -24,6 +26,21 @@ export class NotificationsController {
   markAllRead(@CurrentUser() user: { id: string }) {
     return this.notificationsService.markAllRead(user.id);
   }
+
+
+
+@Delete()
+clearAll(@CurrentUser() user: { id: string }) {
+  return this.notificationsService.clearAll(user.id);
+}
+
+  @Delete(':notificationId')
+deleteOne(
+  @CurrentUser() user: { id: string },
+  @Param('notificationId') notificationId: string,
+) {
+  return this.notificationsService.deleteOne(user.id, notificationId);
+}
 
   @Post('read-one')
   markOneRead(

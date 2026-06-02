@@ -18,6 +18,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SendVerificationDto } from './dto/send-verification.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { MailService } from '../mail/mail.service';
+import { TeacherProfile } from '../teacher/entities/teacher-profile.entity';
 
 @Injectable()
 export class AuthService {
@@ -29,6 +30,8 @@ export class AuthService {
     private jwtService: JwtService,
     private mailService: MailService,
     private dataSource: DataSource,
+    @InjectRepository(TeacherProfile)
+    private teacherProfileRepository: Repository<TeacherProfile>,
   ) {}
 
   async deleteMe(userId: string) {
@@ -163,6 +166,8 @@ export class AuthService {
     user.refresh_token_expires_at = expiresAt;
 
     await this.userRepository.save(user);
+
+    
   }
 
   private buildAuthResponse(
@@ -610,6 +615,11 @@ async sendVerification(dto: SendVerificationDto) {
     user.image_url = trimmedImageUrl;
 
     await this.userRepository.save(user);
+
+    await this.teacherProfileRepository.update(
+  { user: { id: user.id } as any },
+  { image_url: user.image_url },
+);
 
     return {
       id: user.id,

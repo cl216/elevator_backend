@@ -33,6 +33,34 @@ export class NotificationsService {
     return this.notificationsRepository.save(notification);
   }
 
+  async deleteOne(userId: string, notificationId: string) {
+  const notification = await this.notificationsRepository.findOne({
+    where: {
+      id: notificationId,
+      user_id: userId,
+    },
+  });
+
+  if (!notification) {
+    throw new NotFoundException("Notification not found");
+  }
+
+  await this.notificationsRepository.delete({
+    id: notificationId,
+    user_id: userId,
+  });
+
+  return { success: true };
+}
+
+async clearAll(userId: string) {
+  await this.notificationsRepository.delete({
+    user_id: userId,
+  });
+
+  return { success: true };
+}
+
   async createAndPush(
 pushNotificationsService: {
   sendToUser: (

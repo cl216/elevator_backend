@@ -172,6 +172,26 @@ async approveSession(@Param('id') sessionId: string) {
   await this.sessionsService.sessionsRepository.save(session);
 
   await this.notificationsService.create({
+  user_id: session.teacher.id,
+  type: "SESSION_APPROVED",
+  title: "Session approved",
+  body: `"${session.class.title}" is now live on the marketplace.`,
+  payload: {
+    session_id: session.id,
+  },
+});
+
+await this.pushNotificationsService.sendToUser(
+  session.teacher.id,
+  "Session approved",
+  `"${session.class.title}" is now live on the marketplace.`,
+  {
+    session_id: session.id,
+    type: "SESSION_APPROVED",
+  },
+);
+
+  await this.notificationsService.create({
     user_id: session.teacher.id,
     type: 'SESSION_APPROVED',
     title: 'Session approved',
