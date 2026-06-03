@@ -1,6 +1,7 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { Resend } from 'resend';
 
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -15,12 +16,20 @@ export class MailService {
   }
 
   async sendVerificationEmail(to: string, token: string) {
-    const appBaseUrl = process.env.APP_BASE_URL;
-    if (!appBaseUrl) {
-      throw new InternalServerErrorException('APP_BASE_URL is not configured');
-    }
+    // const appBaseUrl = process.env.APP_BASE_URL;
+    // if (!appBaseUrl) {
+    //   throw new InternalServerErrorException('APP_BASE_URL is not configured');
+    // }
 
-const verifyUrl = `elevator://verify-email?token=${encodeURIComponent(token)}`;  const { error } = await this.resend.emails.send({
+const apiBaseUrl = process.env.APP_URL;
+
+if (!apiBaseUrl) {
+  throw new InternalServerErrorException('APP_URL is not configured');
+}
+
+const verifyUrl = `${process.env.APP_URL}/auth/verify-email?token=${encodeURIComponent(token)}`;
+
+const { error } = await this.resend.emails.send({
       from: this.fromEmail,
       to,
       subject: 'Verify your Elevator account',

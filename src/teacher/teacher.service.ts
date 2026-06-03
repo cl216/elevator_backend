@@ -88,19 +88,7 @@ export class TeacherService {
     [teacherId],
   );
 
-  const attendanceConfirmations = await this.dataSource.query(
-  `
-  SELECT COUNT(DISTINCT b.id)::int AS count
-  FROM bookings b
-  INNER JOIN sessions s ON s.id = b.session_id
-  WHERE s.teacher_id = $1
-    AND b.status = 'CONFIRMED'
-    AND s.status = 'ACTIVE'
-    AND s.start_time <= NOW() - INTERVAL '15 minutes'
-    AND s.start_time >= NOW() - INTERVAL '24 hours'
-  `,
-  [teacherId],
-);
+
 
   const openPrivateRequestsCount = Number(openPrivateRequests?.[0]?.count ?? 0);
   const refundIssuesCount = Number(refundIssues?.[0]?.count ?? 0);
@@ -108,9 +96,7 @@ export class TeacherService {
     missingArrivalInstructions?.[0]?.count ?? 0,
   );
   const sessionsTodayCount = Number(sessionsToday?.[0]?.count ?? 0);
-const attendanceConfirmationsCount = Number(
-  attendanceConfirmations?.[0]?.count ?? 0,
-);
+
   const items: any[] = [];
 
   if (openPrivateRequestsCount > 0) {
@@ -172,20 +158,6 @@ const attendanceConfirmationsCount = Number(
       countsTowardBadge: false,
     });
   }
-  if (attendanceConfirmationsCount > 0) {
-  items.push({
-    type: 'attendance_confirmation',
-    count: attendanceConfirmationsCount,
-    label:
-      attendanceConfirmationsCount === 1
-        ? '1 booking may need attendance confirmation'
-        : `${attendanceConfirmationsCount} bookings may need attendance confirmation`,
-    priority: 'high',
-    route: '/(teacher)/sessions',
-    actionLabel: 'Review attendance',
-    countsTowardBadge: true,
-  });
-}
 
   const totalActionItems = items
     .filter((item) => item.countsTowardBadge)

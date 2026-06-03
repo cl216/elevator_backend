@@ -7,7 +7,9 @@ import {
   Query,
   Delete,
   Patch,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -71,11 +73,20 @@ export class AuthController {
     return this.authService.verifyEmail(dto);
   }
 
-  @Get('verify-email')
-  @Throttle({ short: { limit: 10, ttl: 60_000 } })
-  verifyEmailFromLink(@Query('token') token: string) {
-    return this.authService.verifyEmail({ token });
+@Get('verify-email')
+@Throttle({ short: { limit: 10, ttl: 60_000 } })
+async verifyEmailFromLink(
+  @Query('token') token: string,
+  @Res() res: Response,
+) {
+  try {
+    await this.authService.verifyEmail({ token });
+
+    return res.redirect('elevator://verify-email?verified=1');
+  } catch {
+    return res.redirect('elevator://verify-email?failed=1');
   }
+}
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
@@ -98,9 +109,8 @@ export class AuthController {
     return this.authService.deleteMe(user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
-  @Post('delete-account')
-  deleteAccount(@CurrentUser() user: { id: string }) {
-    return this.authService.deleteAccount(user.id);
-  }
+@Post('delete-account')
+deleteAccount(@CurrentUser() user: { id: string }) {
+  return this.authService.deleteMe(user.id);
+}
 }
