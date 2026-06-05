@@ -109,6 +109,7 @@ async verifyEmailFromLink(
     return this.authService.deleteMe(user.id);
   }
 
+  @UseGuards(JwtAuthGuard)
 @Post('delete-account')
 deleteAccount(@CurrentUser() user: { id: string }) {
   return this.authService.deleteMe(user.id);
