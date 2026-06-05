@@ -40,6 +40,7 @@ export class AuthService {
         `DELETE FROM reviews WHERE learner_id = $1 OR teacher_id = $1`,
         [userId],
       );
+    
 
       await manager.query(
         `DELETE FROM bookings WHERE user_id = $1 OR cancelled_by_user_id = $1`,
@@ -60,14 +61,21 @@ export class AuthService {
         [userId],
       );
 
-      await manager.query(
-        `DELETE FROM sessions WHERE teacher_id = $1 OR private_invitee_user_id = $1`,
-        [userId],
-      );
+await manager.query(
+  `DELETE FROM sessions WHERE teacher_id = $1 OR private_invitee_user_id = $1`,
+  [userId],
+);
 
-      await manager.query(`DELETE FROM teacher_profiles WHERE user_id = $1`, [
-        userId,
-      ]);
+await manager.query(
+  `DELETE FROM classes WHERE teacher_id = $1`,
+  [userId],
+);
+
+await manager.query(`DELETE FROM teacher_profiles WHERE user_id = $1`, [
+  userId,
+]);
+
+await manager.query(`DELETE FROM users WHERE id = $1`, [userId]);
 
       await manager.query(`DELETE FROM users WHERE id = $1`, [userId]);
     });
@@ -77,21 +85,9 @@ export class AuthService {
     return { success: true };
   }
 
-  async deleteAccount(userId: string) {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      return { success: true };
-    }
-
-    await this.userRepository.remove(user);
-
-    this.logger.log(`AUTH_DELETE_ACCOUNT_SUCCESS userId=${userId}`);
-
-    return { success: true };
-  }
+async deleteAccount(userId: string) {
+  return this.deleteMe(userId);
+}
 
   private get isProduction() {
     return process.env.NODE_ENV === 'production';
