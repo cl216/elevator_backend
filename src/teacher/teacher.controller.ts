@@ -74,14 +74,7 @@ export class TeacherController {
 
   @Get('stripe/return')
   async stripeReturn(@Res() res: Response) {
-    return res.send(`
-      <html>
-        <body style="font-family: sans-serif; padding: 24px;">
-          <h2>Stripe onboarding complete</h2>
-          <p>You can return to the Elevator app now.</p>
-        </body>
-      </html>
-    `);
+    return res.redirect('elevator://stripe-return?refresh=1');
   }
 
   @Post(':id/follow')
