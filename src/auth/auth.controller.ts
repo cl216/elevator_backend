@@ -73,20 +73,20 @@ export class AuthController {
     return this.authService.verifyEmail(dto);
   }
 
-@Get('verify-email')
-@Throttle({ short: { limit: 10, ttl: 60_000 } })
-async verifyEmailFromLink(
-  @Query('token') token: string,
-  @Res() res: Response,
-) {
-  try {
-    await this.authService.verifyEmail({ token });
+  @Get('verify-email')
+  @Throttle({ short: { limit: 10, ttl: 60_000 } })
+  async verifyEmailFromLink(
+    @Query('token') token: string,
+    @Res() res: Response,
+  ) {
+    try {
+      await this.authService.verifyEmail({ token });
 
-    return res.redirect('elevator://verify-email?verified=1');
-  } catch {
-    return res.redirect('elevator://verify-email?failed=1');
+      return res.redirect('elevator://login?verified=1');
+    } catch {
+      return res.redirect('elevator://verify-email?failed=1');
+    }
   }
-}
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
@@ -110,8 +110,8 @@ async verifyEmailFromLink(
   }
 
   @UseGuards(JwtAuthGuard)
-@Post('delete-account')
-deleteAccount(@CurrentUser() user: { id: string }) {
-  return this.authService.deleteMe(user.id);
-}
+  @Post('delete-account')
+  deleteAccount(@CurrentUser() user: { id: string }) {
+    return this.authService.deleteMe(user.id);
+  }
 }
