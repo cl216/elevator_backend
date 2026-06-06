@@ -118,16 +118,16 @@ constructor(
     );
   }
 
-    @Patch(':id/review/approve')
-  @UseGuards(JwtAuthGuard)
+@Patch(':id/review/approve')
+@UseGuards(JwtAuthGuard, AdminGuard)
   approveSessionForReview(
     @Param('id') sessionId: string,
   ) {
     return this.sessionsService.approveSessionForReview(sessionId);
   }
-
-  @Patch(':id/review/reject')
-  @UseGuards(JwtAuthGuard)
+  
+@Patch(':id/review/reject')
+@UseGuards(JwtAuthGuard, AdminGuard)
   rejectSessionForReview(
     @Param('id') sessionId: string,
     @Body() dto: RejectSessionDto,
@@ -171,31 +171,14 @@ async approveSession(@Param('id') sessionId: string) {
 
   await this.sessionsService.sessionsRepository.save(session);
 
-  await this.notificationsService.create({
-  user_id: session.teacher.id,
-  type: "SESSION_APPROVED",
-  title: "Session approved",
-  body: `"${session.class.title}" is now live on the marketplace.`,
-  payload: {
-    session_id: session.id,
-  },
-});
-
-await this.pushNotificationsService.sendToUser(
-  session.teacher.id,
-  "Session approved",
-  `"${session.class.title}" is now live on the marketplace.`,
-  {
-    session_id: session.id,
-    type: "SESSION_APPROVED",
-  },
-);
+  const title = 'Session approved';
+  const body = `"${session.class.title}" is now live on the marketplace.`;
 
   await this.notificationsService.create({
     user_id: session.teacher.id,
     type: 'SESSION_APPROVED',
-    title: 'Session approved',
-    body: `"${session.class.title}" is now live on the marketplace.`,
+    title,
+    body,
     payload: {
       session_id: session.id,
     },
@@ -203,8 +186,8 @@ await this.pushNotificationsService.sendToUser(
 
   await this.pushNotificationsService.sendToUser(
     session.teacher.id,
-    'Session approved',
-    `"${session.class.title}" is now live on the marketplace.`,
+    title,
+    body,
     {
       session_id: session.id,
       type: 'SESSION_APPROVED',

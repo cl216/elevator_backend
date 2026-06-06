@@ -24,6 +24,36 @@ export class ClassesService {
     private readonly categoryRepository: Repository<Category>,
   ) {}
 
+private async findOrCreateApprovedCategory(
+  categoryInput: string,
+  user: User,
+): Promise<Category> {
+  const label = categoryInput.trim();
+  const slug = label.toLowerCase();
+
+  let category = await this.categoryRepository.findOne({
+    where: { slug } as any,
+  });
+
+  if (!category) {
+    const newCategory = new Category();
+
+    newCategory.slug = slug;
+    newCategory.label = label;
+    newCategory.status = 'approved' as any;
+    newCategory.created_by = user;
+
+    category = await this.categoryRepository.save(newCategory);
+  }
+
+  if (category.status !== 'approved') {
+    category.status = 'approved' as any;
+    category = await this.categoryRepository.save(category);
+  }
+
+  return category;
+}
+
   async createClass(user: User, dto: CreateClassDto) {
     const dbUser = await this.userRepository.findOne({
       where: { id: user.id },
@@ -34,18 +64,10 @@ export class ClassesService {
       throw new ForbiddenException('Teacher profile required to create classes');
     }
 
-    const normalizedCategory = dto.category.trim().toLowerCase();
-
-    const approvedCategory = await this.categoryRepository.findOne({
-      where: {
-        slug: normalizedCategory,
-        status: 'approved',
-      } as any,
-    });
-
-    if (!approvedCategory) {
-      throw new BadRequestException('Category is not approved');
-    }
+    const approvedCategory = await this.findOrCreateApprovedCategory(
+      dto.category,
+      dbUser,
+    );
 
     const newClass = this.classRepository.create({
       title: dto.title.trim(),
@@ -93,18 +115,10 @@ export class ClassesService {
     }
 
     if (typeof dto.category === 'string') {
-      const normalizedCategory = dto.category.trim().toLowerCase();
-
-      const approvedCategory = await this.categoryRepository.findOne({
-        where: {
-          slug: normalizedCategory,
-          status: 'approved',
-        } as any,
-      });
-
-      if (!approvedCategory) {
-        throw new BadRequestException('Category is not approved');
-      }
+      const approvedCategory = await this.findOrCreateApprovedCategory(
+        dto.category,
+        dbUser,
+      );
 
       existing.category = approvedCategory.slug;
     }
@@ -117,7 +131,9 @@ export class ClassesService {
       if (!Number.isFinite(dto.price) || dto.price <= 0) {
         throw new BadRequestException('Price must be greater than zero');
       }
-existing.priceCents = Math.round(dto.price * 100);    }
+
+      existing.priceCents = Math.round(dto.price * 100);
+    }
 
     if (typeof dto.image_url_1 === 'string') {
       existing.image_url_1 = dto.image_url_1.trim() || null;

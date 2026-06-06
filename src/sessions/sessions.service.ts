@@ -378,10 +378,7 @@ if (overlappingSession) {
       rough_location: roughLocation,
       arrival_instructions: arrivalInstructions,
       status: SessionStatus.ACTIVE,
-      reviewStatus:
-        sessionType === SessionType.PRIVATE
-          ? REVIEW_STATUS.ACTIVE
-          : REVIEW_STATUS.PENDING_REVIEW,
+reviewStatus: REVIEW_STATUS.ACTIVE,
       cancelled_at: null,
       session_type: sessionType,
       private_request: input.private_request ?? null,
@@ -628,10 +625,7 @@ if (overlappingSession) {
       session.class.image_url_3 = dto.image_url_3.trim() || null;
     }
 
-    session.reviewStatus =
-      session.session_type === SessionType.PRIVATE
-        ? REVIEW_STATUS.ACTIVE
-        : REVIEW_STATUS.PENDING_REVIEW;
+session.reviewStatus = REVIEW_STATUS.ACTIVE;
 
     await this.classesRepository.save(session.class);
 
@@ -690,7 +684,7 @@ if (overlappingSession) {
       start_time: start,
       end_time: endTime,
       duration: original.duration,
-      reviewStatus: REVIEW_STATUS.PENDING_REVIEW,
+reviewStatus: REVIEW_STATUS.ACTIVE,
       max_participants:
         original.session_type === SessionType.PRIVATE
           ? 6

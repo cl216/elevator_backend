@@ -98,13 +98,48 @@ export class ClassRequestsService {
       .orderBy('session.start_time', 'DESC')
       .limit(20)
       .getRawMany();
+if (teacherSessions.length === 0) {
+  const existingCategoryRows = await this.classRequestsRepository
+    .createQueryBuilder('cr')
+    .select('cr.category', 'category')
+    .addSelect('COUNT(*)', 'count')
+    .where('cr.request_type = :requestType', {
+      requestType: 'existing_category',
+    })
+    .andWhere('cr.review_status IN (:...visibleStatuses)', {
+      visibleStatuses: ['pending', 'approved'],
+    })
+    .groupBy('cr.category')
+    .orderBy('count', 'DESC')
+    .limit(5)
+    .getRawMany();
 
-    if (teacherSessions.length === 0) {
-      return {
-        existing_categories: [],
-        custom_ideas: [],
-      };
-    }
+  const customIdeaRows = await this.classRequestsRepository
+    .createQueryBuilder('cr')
+    .select('cr.custom_title', 'custom_title')
+    .addSelect('COUNT(*)', 'count')
+    .where('cr.request_type = :requestType', {
+      requestType: 'new_class',
+    })
+    .andWhere('cr.review_status IN (:...visibleStatuses)', {
+      visibleStatuses: ['pending', 'approved'],
+    })
+    .groupBy('cr.custom_title')
+    .orderBy('count', 'DESC')
+    .limit(5)
+    .getRawMany();
+
+  return {
+    existing_categories: existingCategoryRows.map((row) => ({
+      category: row.category,
+      count: Number(row.count),
+    })),
+    custom_ideas: customIdeaRows.map((row) => ({
+      custom_title: row.custom_title,
+      count: Number(row.count),
+    })),
+  };
+}
 
     const avgLat =
       teacherSessions.reduce((sum, row) => sum + Number(row.lat), 0) /

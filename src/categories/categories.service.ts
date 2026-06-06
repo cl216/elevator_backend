@@ -70,7 +70,7 @@ export class CategoriesService {
     const category = this.categoriesRepository.create({
       slug,
       label: cleanedLabel,
-      status: 'pending',
+status: 'approved',
       created_by: user,
     });
 
@@ -81,7 +81,7 @@ export class CategoriesService {
       slug: saved.slug,
       label: saved.label,
       status: saved.status,
-      message: 'Category proposal submitted for review',
+message: 'Category created',
     };
   }
 }
