@@ -37,7 +37,7 @@ const { error } = await this.resend.emails.send({
         <div>
           <h2>Verify your email</h2>
           <p>Welcome to Elevator. Please verify your email to activate your account.</p>
-          <p><a href="${verifyUrl}">Verify email</a></p>
+          <p><a href="${verifyUrl}">Complete verification by logging in</a></p>
           <p>If you did not create this account, you can ignore this email.</p>
         </div>
       `,
