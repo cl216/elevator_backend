@@ -7,6 +7,8 @@ import {
   BookingStatus,
   PayoutStatus,
 } from '../bookings/entities/booking.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { PushNotificationsService } from '../notifications/push-notifications.service';
 
 @Injectable()
 export class PayoutsService {
@@ -16,7 +18,11 @@ export class PayoutsService {
     apiVersion: '2026-01-28.clover',
   });
 
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly notificationsService: NotificationsService,
+    private readonly pushNotificationsService: PushNotificationsService,
+  ) {}
 
   @Cron('*/1 * * * *')
   async runPayouts() {
@@ -33,9 +39,9 @@ export class PayoutsService {
           .innerJoinAndSelect('t.teacherProfile', 'tp')
           .where('b.status IN (:...payableStatuses)', {
             payableStatuses: [
-BookingStatus.COMPLETED,
-BookingStatus.LEARNER_NO_SHOW,
-BookingStatus.LATE_CANCELLED_BY_LEARNER,
+              BookingStatus.COMPLETED,
+              BookingStatus.LEARNER_NO_SHOW,
+              BookingStatus.LATE_CANCELLED_BY_LEARNER,
             ],
           })
           .andWhere('b.payout_status = :notPaid', {
@@ -57,12 +63,10 @@ BookingStatus.LATE_CANCELLED_BY_LEARNER,
         }
       });
 
-      const durationMs = Date.now() - startedAt;
-      this.logger.log(`PAYOUT_CRON_COMPLETED durationMs=${durationMs}`);
+      this.logger.log(`PAYOUT_CRON_COMPLETED durationMs=${Date.now() - startedAt}`);
     } catch (e: any) {
-      const durationMs = Date.now() - startedAt;
       this.logger.error(
-        `PAYOUT_CRON_FAILED durationMs=${durationMs} message=${e?.message ?? 'unknown'}`,
+        `PAYOUT_CRON_FAILED durationMs=${Date.now() - startedAt} message=${e?.message ?? 'unknown'}`,
         e?.stack,
       );
       throw e;
@@ -74,61 +78,37 @@ BookingStatus.LATE_CANCELLED_BY_LEARNER,
 
     const booking = await manager.findOne(Booking, {
       where: { id: bookingId },
-      relations: { session: { teacher: { teacherProfile: true } } } as any,
+      relations: {
+        session: {
+          class: true,
+          teacher: {
+            teacherProfile: true,
+          },
+        },
+      } as any,
     });
 
-    if (!booking) {
-      this.logger.warn(
-        `PAYOUT_ATTEMPT_BOOKING_NOT_FOUND bookingId=${bookingId}`,
-      );
-      return;
-    }
+    if (!booking) return;
 
     const payableStatuses = [
-BookingStatus.COMPLETED,
-BookingStatus.LEARNER_NO_SHOW,
-BookingStatus.LATE_CANCELLED_BY_LEARNER,
+      BookingStatus.COMPLETED,
+      BookingStatus.LEARNER_NO_SHOW,
+      BookingStatus.LATE_CANCELLED_BY_LEARNER,
     ];
 
-    if (!payableStatuses.includes(booking.status)) {
-      this.logger.warn(
-        `PAYOUT_ATTEMPT_SKIPPED_INVALID_STATUS bookingId=${booking.id} status=${booking.status}`,
-      );
-      return;
-    }
-
-    if (booking.payout_status !== PayoutStatus.NOT_PAID_OUT) {
-      this.logger.warn(
-        `PAYOUT_ATTEMPT_SKIPPED_ALREADY_PROCESSED bookingId=${booking.id} payoutStatus=${booking.payout_status}`,
-      );
-      return;
-    }
+    if (!payableStatuses.includes(booking.status)) return;
+    if (booking.payout_status !== PayoutStatus.NOT_PAID_OUT) return;
 
     const payoutAmount =
       booking.teacher_payout_amount ??
       booking.lesson_amount ??
       booking.amount;
 
-    if (!payoutAmount || !booking.currency) {
-      this.logger.warn(
-        `PAYOUT_ATTEMPT_SKIPPED_MISSING_AMOUNT_OR_CURRENCY bookingId=${booking.id} payoutAmount=${payoutAmount} currency=${booking.currency}`,
-      );
-      return;
-    }
+    if (!payoutAmount || !booking.currency) return;
 
     const teacherProfile = booking.session.teacher.teacherProfile;
 
-    if (!teacherProfile?.stripe_account_id) {
-      this.logger.warn(
-        `PAYOUT_ATTEMPT_SKIPPED_MISSING_STRIPE_ACCOUNT bookingId=${booking.id}`,
-      );
-      return;
-    }
-
-    if (!teacherProfile?.stripe_enabled) {
-      this.logger.warn(
-        `PAYOUT_ATTEMPT_SKIPPED_STRIPE_NOT_ENABLED bookingId=${booking.id}`,
-      );
+    if (!teacherProfile?.stripe_account_id || !teacherProfile?.stripe_enabled) {
       return;
     }
 
@@ -155,6 +135,8 @@ BookingStatus.LATE_CANCELLED_BY_LEARNER,
 
       await manager.save(booking);
 
+      await this.notifyTeacherPayoutSent(booking, payoutAmount);
+
       this.logger.log(
         `PAYOUT_SUCCESS bookingId=${booking.id} transferId=${transfer.id} destinationAccount=${teacherStripeAccountId} amount=${payoutAmount}`,
       );
@@ -166,6 +148,49 @@ BookingStatus.LATE_CANCELLED_BY_LEARNER,
 
       this.logger.warn(
         `PAYOUT_FAILED bookingId=${booking.id} message=${booking.payout_failure_reason}`,
+      );
+    }
+  }
+
+  private async notifyTeacherPayoutSent(booking: Booking, payoutAmount: number) {
+    try {
+      const teacherId = booking.session?.teacher?.id;
+      const classTitle =
+        (booking.session as any)?.class?.title ??
+        (booking.session as any)?.class?.name ??
+        'your session';
+
+      if (!teacherId) return;
+
+      const amountLabel = `€${(payoutAmount / 100).toFixed(2)}`;
+      const title = 'Payout sent 💸';
+      const body = `${amountLabel} from "${classTitle}" has been sent to your Stripe account.`;
+
+      await this.notificationsService.create({
+        user_id: teacherId,
+        type: 'PAYOUT_SENT',
+        title,
+        body,
+        payload: {
+          bookingId: booking.id,
+          sessionId: booking.session?.id,
+          amount: payoutAmount,
+          currency: booking.currency,
+        },
+      });
+
+      await this.pushNotificationsService.sendToUser(teacherId, title, body, {
+        type: 'PAYOUT_SENT',
+        bookingId: booking.id,
+        sessionId: booking.session?.id,
+      });
+
+      this.logger.log(
+        `PAYOUT_NOTIFICATION_SENT bookingId=${booking.id} teacherId=${teacherId}`,
+      );
+    } catch (e: any) {
+      this.logger.warn(
+        `PAYOUT_NOTIFICATION_FAILED bookingId=${booking.id} message=${e?.message ?? 'unknown'}`,
       );
     }
   }

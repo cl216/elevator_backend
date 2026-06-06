@@ -7,6 +7,7 @@ import { Notification } from '../notifications/entities/notification.entity';
 import { BookingsModule } from '../bookings/bookings.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { User } from '../users/user.entity';
+import { PayoutsService } from './payouts.service';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { User } from '../users/user.entity';
     NotificationsModule,
   ],
   controllers: [PaymentsController],
-  providers: [PaymentsService],
+  providers: [PaymentsService, PayoutsService],
   exports: [PaymentsService],
 })
 export class PaymentsModule {}

@@ -277,7 +277,7 @@ async deleteAccount(userId: string) {
       image_url: user.image_url,
       hasTeacherProfile: false,
       email_verified: false,
-      message: 'Account created. Please verify your email before logging in.',
+      message: 'Account created. Please verify the email we sent you before logging in.',
       ...this.buildDevVerificationPayload(rawToken),
     };
   }
