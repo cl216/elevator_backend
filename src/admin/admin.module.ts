@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AdminController } from './admin.controller';
@@ -11,7 +11,10 @@ import { Session } from '../sessions/entities/session.entity';
 import { Class } from '../classes/entities/class.entity';
 import { ClassRequest } from '../class-requests/class-request.entity';
 import { TeacherProfile } from '../teacher/entities/teacher-profile.entity';
-import { PaymentsModule } from 'src/payments/payments.module';
+
+import { PaymentsModule } from '../payments/payments.module';
+import { SessionsModule } from '../sessions/session.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -24,8 +27,9 @@ import { PaymentsModule } from 'src/payments/payments.module';
       ClassRequest,
       TeacherProfile,
     ]),
-          PaymentsModule
-
+    PaymentsModule,
+    SessionsModule,
+    NotificationsModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],
