@@ -72,10 +72,10 @@ export class TeacherController {
     return res.redirect(url);
   }
 
-  @Get('stripe/return')
-  async stripeReturn(@Res() res: Response) {
-    return res.redirect('elevator://stripe-return?refresh=1');
-  }
+@Get('stripe/return')
+async stripeReturn(@Res() res: Response) {
+  return res.redirect('elevator://dashboard?refresh=1');
+}
 
   @Post(':id/follow')
   @UseGuards(JwtAuthGuard)

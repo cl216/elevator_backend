@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import { PaymentsService } from '../payments/payments.service';
 import { User } from '../users/user.entity';
 import { Category } from '../categories/category.entity';
+import { SessionsService } from '../sessions/sessions.service';
 import {
   Booking,
   BookingStatus,
@@ -16,6 +17,7 @@ import { Session } from '../sessions/entities/session.entity';
 import { Class } from '../classes/entities/class.entity';
 import { ClassRequest } from '../class-requests/class-request.entity';
 import { TeacherProfile } from '../teacher/entities/teacher-profile.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class AdminService {
@@ -42,6 +44,8 @@ export class AdminService {
     private readonly teacherProfilesRepository: Repository<TeacherProfile>,
 
     private readonly paymentsService: PaymentsService,
+    private readonly sessionsService: SessionsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async getUsers() {
@@ -68,15 +72,63 @@ export class AdminService {
     });
   }
 
-  async approveCategory(id: string) {
-    await this.categoriesRepository.update(id, { status: 'approved' });
-    return { success: true };
+async approveCategory(id: string) {
+  const category = await this.categoriesRepository.findOne({
+    where: { id },
+    relations: { created_by: true } as any,
+  });
+
+  if (!category) {
+    throw new NotFoundException('Category not found');
   }
 
-  async rejectCategory(id: string) {
-    await this.categoriesRepository.update(id, { status: 'rejected' });
-    return { success: true };
+  category.status = 'approved' as any;
+  await this.categoriesRepository.save(category);
+
+  if (category.created_by?.id) {
+    await this.notificationsService.create({
+      user_id: category.created_by.id,
+      type: 'CATEGORY_APPROVED',
+      title: 'Category approved',
+      body: `Your category "${category.label}" has been approved and is now live.`,
+      payload: {
+        category_id: category.id,
+        status: 'approved',
+      },
+    });
   }
+
+  return { success: true };
+}
+
+async rejectCategory(id: string) {
+  const category = await this.categoriesRepository.findOne({
+    where: { id },
+    relations: { created_by: true } as any,
+  });
+
+  if (!category) {
+    throw new NotFoundException('Category not found');
+  }
+
+  category.status = 'rejected' as any;
+  await this.categoriesRepository.save(category);
+
+  if (category.created_by?.id) {
+    await this.notificationsService.create({
+      user_id: category.created_by.id,
+      type: 'CATEGORY_REJECTED',
+      title: 'Category not approved',
+      body: `Your category "${category.label}" was not approved.`,
+      payload: {
+        category_id: category.id,
+        status: 'rejected',
+      },
+    });
+  }
+
+  return { success: true };
+}
 
   async getBookings() {
     return this.bookingsRepository.find({
@@ -102,15 +154,13 @@ export class AdminService {
     });
   }
 
-  async approveSession(id: string) {
-    await this.sessionsRepository.update(id, { reviewStatus: 'ACTIVE' });
-    return { success: true };
-  }
+async approveSession(id: string) {
+  return this.sessionsService.approveSessionForReview(id);
+}
 
-  async rejectSession(id: string) {
-    await this.sessionsRepository.update(id, { reviewStatus: 'REJECTED' });
-    return { success: true };
-  }
+async rejectSession(id: string) {
+  return this.sessionsService.rejectSessionForReview(id);
+}
 
   async getClassRequests() {
     return this.classRequestsRepository.find({
