@@ -37,6 +37,12 @@ export class TeacherController {
     return this.teacherService.getTeacherAttentionSummary(user.id);
   }
 
+  @Get('payout-summary')
+@UseGuards(JwtAuthGuard)
+async getPayoutSummary(@CurrentUser() user: { id: string }) {
+  return this.teacherService.getPayoutSummary(user.id);
+}
+
   @Post('stripe/onboard')
   @UseGuards(JwtAuthGuard)
   async stripeOnboard(@CurrentUser() user: { id: string }) {

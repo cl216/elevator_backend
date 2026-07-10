@@ -894,6 +894,95 @@ if (hoursSinceEnd > 24) {
     return saved;
   }
 
+  @Cron('*/5 * * * *')
+async notifyTeachersReviewPeriodStarted() {
+  const startedAt = Date.now();
+
+  this.logger.log('SESSION_REVIEW_PERIOD_NOTIFICATION_CRON_STARTED');
+
+  try {
+    const sessionRepo = this.dataSource.getRepository(Session);
+    const bookingRepo = this.dataSource.getRepository(Booking);
+
+    const sessions = await sessionRepo
+      .createQueryBuilder('s')
+      .innerJoinAndSelect('s.teacher', 'teacher')
+      .innerJoinAndSelect('s.class', 'class')
+      .where('s.end_time <= NOW()')
+      .andWhere('s.payout_review_notified_at IS NULL')
+      .andWhere(`
+        EXISTS (
+          SELECT 1
+          FROM bookings b
+          WHERE b.session_id = s.id
+          AND b.status = :confirmed
+        )
+      `)
+      .setParameter('confirmed', BookingStatus.CONFIRMED)
+      .orderBy('s.end_time', 'ASC')
+      .limit(25)
+      .getMany();
+
+    for (const session of sessions) {
+      const expectedPayout = await bookingRepo
+        .createQueryBuilder('b')
+        .select(
+          'COALESCE(SUM(COALESCE(b.teacher_payout_amount, b.lesson_amount, b.amount)), 0)',
+          'total',
+        )
+        .where('b.session_id = :sessionId', { sessionId: session.id })
+        .andWhere('b.status = :confirmed', {
+          confirmed: BookingStatus.CONFIRMED,
+        })
+        .getRawOne();
+
+      const payoutAmount = Number(expectedPayout?.total ?? 0);
+      const amountLabel = `€${(payoutAmount / 100).toFixed(2)}`;
+      const classTitle = session.class?.title ?? 'your session';
+
+      await this.dataSource.getRepository(Notification).save(
+        this.dataSource.getRepository(Notification).create({
+          user_id: session.teacher.id,
+          type: 'PAYOUT_REVIEW_PERIOD_STARTED',
+          title: 'Session finished',
+          body: `The 24-hour review period for "${classTitle}" has started. If no issue is reported, ${amountLabel} will then be transferred to your Stripe account.`,
+          payload: {
+            session_id: session.id,
+            expected_payout_amount: payoutAmount,
+            currency: 'eur',
+          },
+        }),
+      );
+
+      await this.pushNotificationsService.sendToUser(session.teacher.id, {
+        title: 'Session finished',
+        body: `The 24-hour review period has started. If no issue is reported, ${amountLabel} will be transferred to your Stripe account afterwards.`,
+        data: {
+          type: 'PAYOUT_REVIEW_PERIOD_STARTED',
+          session_id: session.id,
+          expected_payout_amount: String(payoutAmount),
+        },
+      });
+
+      session.payout_review_notified_at = new Date();
+      await sessionRepo.save(session);
+
+      this.logger.log(
+        `SESSION_REVIEW_PERIOD_NOTIFICATION_SENT sessionId=${session.id} teacherId=${session.teacher.id} amount=${payoutAmount}`,
+      );
+    }
+
+    this.logger.log(
+      `SESSION_REVIEW_PERIOD_NOTIFICATION_CRON_COMPLETED count=${sessions.length} durationMs=${Date.now() - startedAt}`,
+    );
+  } catch (error: any) {
+    this.logger.error(
+      `SESSION_REVIEW_PERIOD_NOTIFICATION_CRON_FAILED message=${error?.message ?? 'unknown'}`,
+      error?.stack,
+    );
+  }
+}
+
   @Cron('*/10 * * * *')
   async autoCompleteEligibleBookings() {
     const startedAt = Date.now();
@@ -1001,9 +1090,10 @@ async getMyBookings(userId: string) {
       'b.cancelled_at AS booking_cancelled_at',
       'b.refunded_at AS booking_refunded_at',
 
-      's.id AS session_id',
-      's.start_time AS session_start_time',
-      's.price AS session_price',
+'s.id AS session_id',
+'s.start_time AS session_start_time',
+'s.end_time AS session_end_time',
+'s.price AS session_price',
       's.max_participants AS session_max_participants',
       's.rough_location AS session_rough_location',
 
@@ -1039,9 +1129,17 @@ async getMyBookings(userId: string) {
       'c.title AS class_title',
       'c.category AS class_category',
 
-      'tp.full_name AS teacher_name',
-    ])
-    .getRawMany();
+'tp.full_name AS teacher_name',
+])
+.addSelect(
+  `EXISTS (
+    SELECT 1
+    FROM reviews review
+    WHERE review.booking_id = b.id
+  )`,
+  'booking_has_review',
+)
+.getRawMany();
 }
 
   private async triggerRefundFlowForCancelledBooking(

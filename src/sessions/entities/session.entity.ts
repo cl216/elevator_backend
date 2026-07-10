@@ -63,6 +63,9 @@ export class Session {
   @Column({ type: 'text', nullable: true })
   arrival_instructions: string | null;
 
+  @Column({ type: 'timestamp', nullable: true })
+payout_review_notified_at: Date | null;
+
   @Column({
     type: 'enum',
     enum: SessionStatus,

@@ -169,6 +169,133 @@ export class TeacherService {
   };
 }
 
+async getPayoutSummary(teacherId: string) {
+  const rows = await this.dataSource.query(
+    `
+    SELECT
+      COALESCE(
+        SUM(
+          CASE
+            WHEN b.payout_status = 'NOT_PAID_OUT'
+              AND b.status IN (
+                'CONFIRMED',
+                'COMPLETED',
+                'LEARNER_NO_SHOW',
+                'LATE_CANCELLED_BY_LEARNER'
+              )
+            THEN COALESCE(
+              b.teacher_payout_amount,
+              b.lesson_amount,
+              b.amount,
+              0
+            )
+            ELSE 0
+          END
+        ),
+        0
+      )::bigint AS pending_amount,
+
+      COUNT(
+        CASE
+          WHEN b.payout_status = 'NOT_PAID_OUT'
+            AND b.status IN (
+              'CONFIRMED',
+              'COMPLETED',
+              'LEARNER_NO_SHOW',
+              'LATE_CANCELLED_BY_LEARNER'
+            )
+          THEN 1
+        END
+      )::int AS pending_count,
+
+      MIN(
+        CASE
+          WHEN b.payout_status = 'NOT_PAID_OUT'
+            AND b.status IN (
+              'CONFIRMED',
+              'COMPLETED',
+              'LEARNER_NO_SHOW',
+              'LATE_CANCELLED_BY_LEARNER'
+            )
+          THEN s.end_time + INTERVAL '24 hours'
+          ELSE NULL
+        END
+      ) AS next_eligible_at,
+
+      COALESCE(
+        SUM(
+          CASE
+            WHEN b.payout_status = 'PAID_OUT'
+            THEN COALESCE(
+              b.teacher_payout_amount,
+              b.lesson_amount,
+              b.amount,
+              0
+            )
+            ELSE 0
+          END
+        ),
+        0
+      )::bigint AS transferred_amount,
+
+      COUNT(
+        CASE
+          WHEN b.payout_status = 'PAID_OUT'
+          THEN 1
+        END
+      )::int AS transferred_count,
+
+      COALESCE(
+        SUM(
+          CASE
+            WHEN b.payout_status = 'PAYOUT_FAILED'
+            THEN COALESCE(
+              b.teacher_payout_amount,
+              b.lesson_amount,
+              b.amount,
+              0
+            )
+            ELSE 0
+          END
+        ),
+        0
+      )::bigint AS failed_amount,
+
+      COUNT(
+        CASE
+          WHEN b.payout_status = 'PAYOUT_FAILED'
+          THEN 1
+        END
+      )::int AS failed_count
+
+    FROM bookings b
+    INNER JOIN sessions s
+      ON s.id = b.session_id
+    WHERE s.teacher_id = $1
+    `,
+    [teacherId],
+  );
+
+  const summary = rows?.[0] ?? {};
+
+  return {
+    pending_amount: Number(summary.pending_amount ?? 0),
+    pending_count: Number(summary.pending_count ?? 0),
+
+    next_eligible_at: summary.next_eligible_at
+      ? new Date(summary.next_eligible_at).toISOString()
+      : null,
+
+    transferred_amount: Number(summary.transferred_amount ?? 0),
+    transferred_count: Number(summary.transferred_count ?? 0),
+
+    failed_amount: Number(summary.failed_amount ?? 0),
+    failed_count: Number(summary.failed_count ?? 0),
+
+    currency: 'eur',
+  };
+}
+
 async createProfile(user: User, dto: CreateTeacherProfileDto) {
   if (dto.bio && containsBlockedContactOrOffPlatformContent(dto.bio)) {
     throw new BadRequestException(

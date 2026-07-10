@@ -183,8 +183,7 @@ export class PaymentsService {
           user_id: confirmedBooking.session.teacher.id,
           type: 'booking_confirmed_teacher',
           title: 'Booking paid',
-          body: `${learnerName} has paid for ${classTitle}.`,
-          payload: {
+body: `${learnerName} has paid for ${classTitle}. Your payout becomes eligible 24 hours after the session ends, provided no issue is reported.`,          payload: {
             booking_id: confirmedBooking.id,
             session_id: confirmedBooking.session?.id,
             class_title: classTitle,
@@ -197,8 +196,7 @@ export class PaymentsService {
         confirmedBooking.session.teacher.id,
         {
           title: 'Booking paid',
-          body: `${learnerName} has paid for ${classTitle}.`,
-          data: {
+body: `${learnerName} has paid for ${classTitle}. Your payout becomes eligible 24 hours after the session ends, provided no issue is reported.`,          data: {
             type: 'booking_confirmed_teacher',
             booking_id: confirmedBooking.id,
             session_id: confirmedBooking.session?.id,

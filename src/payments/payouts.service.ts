@@ -163,9 +163,8 @@ export class PayoutsService {
       if (!teacherId) return;
 
       const amountLabel = `€${(payoutAmount / 100).toFixed(2)}`;
-      const title = 'Payout sent 💸';
-      const body = `${amountLabel} from "${classTitle}" has been sent to your Stripe account.`;
-
+const title = 'Your payout is on its way 💸';
+const body = `${amountLabel} from "${classTitle}" has been transferred to your Stripe account. Your bank may take additional business days to make the funds available.`;
       await this.notificationsService.create({
         user_id: teacherId,
         type: 'PAYOUT_SENT',
