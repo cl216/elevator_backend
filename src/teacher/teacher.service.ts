@@ -244,6 +244,32 @@ async getPayoutSummary(teacherId: string) {
           THEN 1
         END
       )::int AS transferred_count,
+(
+  SELECT COALESCE(
+    b2.teacher_payout_amount,
+    b2.lesson_amount,
+    b2.amount,
+    0
+  )
+  FROM bookings b2
+  INNER JOIN sessions s2
+    ON s2.id = b2.session_id
+  WHERE s2.teacher_id = $1
+    AND b2.payout_status = 'PAID_OUT'
+  ORDER BY b2.paid_out_at DESC NULLS LAST
+  LIMIT 1
+) AS latest_transferred_amount,
+
+(
+  SELECT b2.stripe_funds_available_at
+  FROM bookings b2
+  INNER JOIN sessions s2
+    ON s2.id = b2.session_id
+  WHERE s2.teacher_id = $1
+    AND b2.payout_status = 'PAID_OUT'
+  ORDER BY b2.paid_out_at DESC NULLS LAST
+  LIMIT 1
+) AS latest_funds_available_at,
 
       COALESCE(
         SUM(
@@ -278,22 +304,32 @@ async getPayoutSummary(teacherId: string) {
 
   const summary = rows?.[0] ?? {};
 
-  return {
-    pending_amount: Number(summary.pending_amount ?? 0),
-    pending_count: Number(summary.pending_count ?? 0),
+return {
+  pending_amount: Number(summary.pending_amount ?? 0),
+  pending_count: Number(summary.pending_count ?? 0),
 
-    next_eligible_at: summary.next_eligible_at
-      ? new Date(summary.next_eligible_at).toISOString()
+  next_eligible_at: summary.next_eligible_at
+    ? new Date(summary.next_eligible_at).toISOString()
+    : null,
+
+  transferred_amount: Number(summary.transferred_amount ?? 0),
+  transferred_count: Number(summary.transferred_count ?? 0),
+
+  latest_transferred_amount:
+    summary.latest_transferred_amount !== null &&
+    summary.latest_transferred_amount !== undefined
+      ? Number(summary.latest_transferred_amount)
       : null,
 
-    transferred_amount: Number(summary.transferred_amount ?? 0),
-    transferred_count: Number(summary.transferred_count ?? 0),
+  latest_funds_available_at: summary.latest_funds_available_at
+    ? new Date(summary.latest_funds_available_at).toISOString()
+    : null,
 
-    failed_amount: Number(summary.failed_amount ?? 0),
-    failed_count: Number(summary.failed_count ?? 0),
+  failed_amount: Number(summary.failed_amount ?? 0),
+  failed_count: Number(summary.failed_count ?? 0),
 
-    currency: 'eur',
-  };
+  currency: 'eur',
+};
 }
 
 async createProfile(user: User, dto: CreateTeacherProfileDto) {
