@@ -22,7 +22,7 @@ export class PayoutsService {
     private readonly dataSource: DataSource,
     private readonly notificationsService: NotificationsService,
     private readonly pushNotificationsService: PushNotificationsService,
-  ) {}
+  ) { }
 
   @Cron('*/1 * * * *')
   async runPayouts() {
@@ -50,6 +50,7 @@ export class PayoutsService {
           .andWhere(`s.end_time <= (NOW() - INTERVAL '24 hours')`)
           .andWhere('tp.stripe_account_id IS NOT NULL')
           .andWhere('tp.stripe_enabled = true')
+          .andWhere('b.stripe_charge_id IS NOT NULL')
           .orderBy('s.end_time', 'ASC')
           .limit(25)
           .setLock('pessimistic_write')
@@ -118,14 +119,39 @@ export class PayoutsService {
     await manager.save(booking);
 
     try {
+
+      if (!booking.stripe_charge_id) {
+        this.logger.warn(
+          `PAYOUT_WAITING_FOR_CHARGE_ID bookingId=${booking.id}`,
+        );
+
+        return;
+      }
+
       const transfer = await this.stripe.transfers.create(
         {
           amount: payoutAmount,
           currency: booking.currency,
           destination: teacherStripeAccountId,
-          metadata: { bookingId: booking.id },
+
+          /*
+           * Link this teacher transfer to the learner's exact charge.
+           * Stripe can create the transfer while the charge is pending.
+           * The connected account funds become available on the same
+           * settlement timeline as the source charge.
+           */
+          source_transaction: booking.stripe_charge_id,
+
+          transfer_group: `booking_${booking.id}`,
+
+          metadata: {
+            bookingId: booking.id,
+            sessionId: booking.session.id,
+          },
         },
-        { idempotencyKey: `payout_${booking.id}` },
+        {
+          idempotencyKey: `payout_${booking.id}_${booking.stripe_charge_id}`,
+        },
       );
 
       booking.stripe_transfer_id = transfer.id;
@@ -163,8 +189,21 @@ export class PayoutsService {
       if (!teacherId) return;
 
       const amountLabel = `€${(payoutAmount / 100).toFixed(2)}`;
-const title = 'Your payout is on its way 💸';
-const body = `${amountLabel} from "${classTitle}" has been transferred to your Stripe account. Your bank may take additional business days to make the funds available.`;
+const expectedAvailability =
+  booking.stripe_funds_available_at instanceof Date
+    ? booking.stripe_funds_available_at.toLocaleDateString('en-IE', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'Europe/Dublin',
+      })
+    : null;
+
+const title = 'Payout transferred to Stripe 💸';
+
+const body = expectedAvailability
+  ? `${amountLabel} from "${classTitle}" has been transferred to your Stripe account. Stripe expects the funds to become available around ${expectedAvailability}. Your bank may take additional time after that.`
+  : `${amountLabel} from "${classTitle}" has been transferred to your Stripe account. Stripe and your bank may take additional time to make the funds available.`;
       await this.notificationsService.create({
         user_id: teacherId,
         type: 'PAYOUT_SENT',
@@ -175,6 +214,8 @@ const body = `${amountLabel} from "${classTitle}" has been transferred to your S
           sessionId: booking.session?.id,
           amount: payoutAmount,
           currency: booking.currency,
+          stripeFundsAvailableAt:
+    booking.stripe_funds_available_at?.toISOString?.() ?? null,
         },
       });
 
@@ -182,6 +223,8 @@ const body = `${amountLabel} from "${classTitle}" has been transferred to your S
         type: 'PAYOUT_SENT',
         bookingId: booking.id,
         sessionId: booking.session?.id,
+          stripeFundsAvailableAt:
+    booking.stripe_funds_available_at?.toISOString?.() ?? null,
       });
 
       this.logger.log(

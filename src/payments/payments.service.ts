@@ -114,13 +114,53 @@ export class PaymentsService {
       await this.bookingRepo.save(booking);
     }
 
-    if (booking.status !== BookingStatus.PENDING) {
-      this.logger.log(
-        `STRIPE_WEBHOOK_ALREADY_PROCESSED eventId=${event.id} bookingId=${booking.id} status=${booking.status}`,
+if (booking.status !== BookingStatus.PENDING) {
+  if (
+    booking.stripe_payment_intent_id &&
+    (!booking.stripe_charge_id ||
+      !booking.stripe_funds_available_at)
+  ) {
+    try {
+      const paymentDetails = await this.getStripePaymentDetails(
+        booking.stripe_payment_intent_id,
       );
-      return;
-    }
 
+      booking.stripe_charge_id = paymentDetails.stripeChargeId;
+      booking.stripe_fee_amount = paymentDetails.stripeFeeAmount;
+      booking.stripe_funds_available_at =
+        paymentDetails.stripeFundsAvailableAt;
+
+      await this.bookingRepo.save(booking);
+
+      this.logger.log(
+        `STRIPE_WEBHOOK_PAYMENT_DETAILS_REPAIRED ` +
+          `eventId=${event.id} ` +
+          `bookingId=${booking.id} ` +
+          `chargeId=${paymentDetails.stripeChargeId} ` +
+          `fundsAvailableAt=${
+            paymentDetails.stripeFundsAvailableAt?.toISOString() ??
+            'unknown'
+          }`,
+      );
+    } catch (error: any) {
+      this.logger.warn(
+        `STRIPE_WEBHOOK_PAYMENT_DETAILS_REPAIR_FAILED ` +
+          `eventId=${event.id} ` +
+          `bookingId=${booking.id} ` +
+          `message=${error?.message ?? 'unknown'}`,
+      );
+    }
+  }
+
+  this.logger.log(
+    `STRIPE_WEBHOOK_ALREADY_PROCESSED ` +
+      `eventId=${event.id} ` +
+      `bookingId=${booking.id} ` +
+      `status=${booking.status}`,
+  );
+
+  return;
+}
     const confirmedBooking = await this.bookingsService.markBookingConfirmed({
       bookingId: booking.id,
       stripePaymentIntentId: String(session.payment_intent ?? ''),
@@ -128,19 +168,36 @@ export class PaymentsService {
       paidAt: new Date(),
     });
 
-    if (confirmedBooking.stripe_payment_intent_id) {
+if (confirmedBooking.stripe_payment_intent_id) {
   try {
-    const feeData = await this.syncActualStripeFees(
+    const paymentDetails = await this.getStripePaymentDetails(
       confirmedBooking.stripe_payment_intent_id,
     );
 
+    confirmedBooking.stripe_charge_id =
+      paymentDetails.stripeChargeId;
+
     confirmedBooking.stripe_fee_amount =
-      feeData.stripeFeeAmount;
+      paymentDetails.stripeFeeAmount;
+
+    confirmedBooking.stripe_funds_available_at =
+      paymentDetails.stripeFundsAvailableAt;
 
     await this.bookingRepo.save(confirmedBooking);
-  } catch (e) {
+
+    this.logger.log(
+      `STRIPE_PAYMENT_DETAILS_SAVED ` +
+        `bookingId=${confirmedBooking.id} ` +
+        `chargeId=${paymentDetails.stripeChargeId} ` +
+        `fundsAvailableAt=${
+          paymentDetails.stripeFundsAvailableAt?.toISOString() ?? 'unknown'
+        }`,
+    );
+  } catch (error: any) {
     this.logger.warn(
-      `FAILED_TO_SYNC_REAL_STRIPE_FEES bookingId=${confirmedBooking.id}`,
+      `FAILED_TO_SYNC_STRIPE_PAYMENT_DETAILS ` +
+        `bookingId=${confirmedBooking.id} ` +
+        `message=${error?.message ?? 'unknown'}`,
     );
   }
 }
@@ -183,7 +240,7 @@ export class PaymentsService {
           user_id: confirmedBooking.session.teacher.id,
           type: 'booking_confirmed_teacher',
           title: 'Booking paid',
-body: `${learnerName} has paid for ${classTitle}. Your payout becomes eligible 24 hours after the session ends, provided no issue is reported.`,          payload: {
+body: `${learnerName} has paid for ${classTitle}. After the session, Elevator allows 24 hours for issue reports. Your payout will then be approved and transferred according to Stripe’s processing timeline.`,payload: {
             booking_id: confirmedBooking.id,
             session_id: confirmedBooking.session?.id,
             class_title: classTitle,
@@ -196,7 +253,7 @@ body: `${learnerName} has paid for ${classTitle}. Your payout becomes eligible 2
         confirmedBooking.session.teacher.id,
         {
           title: 'Booking paid',
-body: `${learnerName} has paid for ${classTitle}. Your payout becomes eligible 24 hours after the session ends, provided no issue is reported.`,          data: {
+body: `${learnerName} has paid for ${classTitle}. After the session, Elevator allows 24 hours for issue reports. Your payout will then be approved and transferred according to Stripe’s processing timeline.`,data: {
             type: 'booking_confirmed_teacher',
             booking_id: confirmedBooking.id,
             session_id: confirmedBooking.session?.id,
@@ -525,7 +582,7 @@ booking.currency = currency;
     return { checkoutUrl: session.url, checkoutSessionId: session.id };
   }
 
-  async syncCheckoutStatus(bookingId: string, learnerId: string) {
+async syncCheckoutStatus(bookingId: string, learnerId: string) {
   this.logger.log(
     `PAYMENT_CHECKOUT_SYNC_ATTEMPT bookingId=${bookingId} learnerId=${learnerId}`,
   );
@@ -539,18 +596,61 @@ booking.currency = currency;
   });
 
   if (!booking) {
-    throw new NotFoundException("Booking not found");
+    throw new NotFoundException('Booking not found');
   }
 
   if (booking.user.id !== learnerId) {
-    throw new ForbiddenException("Not your booking");
+    throw new ForbiddenException('Not your booking');
   }
 
+  /*
+   * A confirmed booking may still be missing its charge ID or Stripe
+   * availability date, especially if it was confirmed before this feature
+   * was added. Try to repair those details before returning.
+   */
   if (booking.status === BookingStatus.CONFIRMED) {
+    if (
+      booking.stripe_payment_intent_id &&
+      (!booking.stripe_charge_id ||
+        !booking.stripe_funds_available_at)
+    ) {
+      try {
+        const paymentDetails = await this.getStripePaymentDetails(
+          booking.stripe_payment_intent_id,
+        );
+
+        booking.stripe_charge_id = paymentDetails.stripeChargeId;
+        booking.stripe_fee_amount = paymentDetails.stripeFeeAmount;
+        booking.stripe_funds_available_at =
+          paymentDetails.stripeFundsAvailableAt;
+
+        await this.bookingRepo.save(booking);
+
+        this.logger.log(
+          `STRIPE_PAYMENT_DETAILS_REPAIRED ` +
+            `bookingId=${booking.id} ` +
+            `chargeId=${paymentDetails.stripeChargeId} ` +
+            `fundsAvailableAt=${
+              paymentDetails.stripeFundsAvailableAt?.toISOString() ??
+              'unknown'
+            }`,
+        );
+      } catch (error: any) {
+        this.logger.warn(
+          `FAILED_TO_REPAIR_STRIPE_PAYMENT_DETAILS ` +
+            `bookingId=${booking.id} ` +
+            `message=${error?.message ?? 'unknown'}`,
+        );
+      }
+    }
+
     return {
       status: booking.status,
       bookingId: booking.id,
-      message: "Booking already confirmed.",
+      message: 'Booking already confirmed.',
+      stripeChargeId: booking.stripe_charge_id ?? null,
+      stripeFundsAvailableAt:
+        booking.stripe_funds_available_at?.toISOString?.() ?? null,
     };
   }
 
@@ -558,33 +658,81 @@ booking.currency = currency;
     return {
       status: booking.status,
       bookingId: booking.id,
-      message: "No Stripe checkout session found for this booking.",
+      message: 'No Stripe checkout session found for this booking.',
     };
   }
 
-  const checkoutSession = await this.stripe.checkout.sessions.retrieve(
-    booking.stripe_checkout_session_id,
-  );
+  const checkoutSession =
+    await this.stripe.checkout.sessions.retrieve(
+      booking.stripe_checkout_session_id,
+    );
 
   this.logger.log(
-    `PAYMENT_CHECKOUT_SYNC_STRIPE_STATUS bookingId=${booking.id} checkoutSessionId=${checkoutSession.id} stripeStatus=${checkoutSession.status} paymentStatus=${checkoutSession.payment_status}`,
+    `PAYMENT_CHECKOUT_SYNC_STRIPE_STATUS ` +
+      `bookingId=${booking.id} ` +
+      `checkoutSessionId=${checkoutSession.id} ` +
+      `stripeStatus=${checkoutSession.status} ` +
+      `paymentStatus=${checkoutSession.payment_status}`,
   );
 
   if (
-    checkoutSession.status === "complete" &&
-    checkoutSession.payment_status === "paid"
+    checkoutSession.status === 'complete' &&
+    checkoutSession.payment_status === 'paid'
   ) {
-    await this.bookingsService.markBookingConfirmed({
-      bookingId: booking.id,
-      stripePaymentIntentId: String(checkoutSession.payment_intent ?? ""),
-      stripeCheckoutSessionId: checkoutSession.id,
-      paidAt: new Date(),
-    });
+    const confirmedBooking =
+      await this.bookingsService.markBookingConfirmed({
+        bookingId: booking.id,
+        stripePaymentIntentId: String(
+          checkoutSession.payment_intent ?? '',
+        ),
+        stripeCheckoutSessionId: checkoutSession.id,
+        paidAt: new Date(),
+      });
+
+    if (confirmedBooking.stripe_payment_intent_id) {
+      try {
+        const paymentDetails = await this.getStripePaymentDetails(
+          confirmedBooking.stripe_payment_intent_id,
+        );
+
+        confirmedBooking.stripe_charge_id =
+          paymentDetails.stripeChargeId;
+
+        confirmedBooking.stripe_fee_amount =
+          paymentDetails.stripeFeeAmount;
+
+        confirmedBooking.stripe_funds_available_at =
+          paymentDetails.stripeFundsAvailableAt;
+
+        await this.bookingRepo.save(confirmedBooking);
+
+        this.logger.log(
+          `STRIPE_PAYMENT_DETAILS_SYNCED ` +
+            `bookingId=${confirmedBooking.id} ` +
+            `chargeId=${paymentDetails.stripeChargeId} ` +
+            `fundsAvailableAt=${
+              paymentDetails.stripeFundsAvailableAt?.toISOString() ??
+              'unknown'
+            }`,
+        );
+      } catch (error: any) {
+        this.logger.warn(
+          `FAILED_TO_SYNC_STRIPE_PAYMENT_DETAILS ` +
+            `bookingId=${confirmedBooking.id} ` +
+            `message=${error?.message ?? 'unknown'}`,
+        );
+      }
+    }
 
     return {
       status: BookingStatus.CONFIRMED,
       bookingId: booking.id,
-      message: "Payment confirmed.",
+      message: 'Payment confirmed.',
+      stripeChargeId:
+        confirmedBooking.stripe_charge_id ?? null,
+      stripeFundsAvailableAt:
+        confirmedBooking.stripe_funds_available_at
+          ?.toISOString?.() ?? null,
     };
   }
 
@@ -593,13 +741,11 @@ booking.currency = currency;
     bookingId: booking.id,
     stripeStatus: checkoutSession.status,
     paymentStatus: checkoutSession.payment_status,
-    message: "Payment has not been confirmed by Stripe yet.",
+    message: 'Payment has not been confirmed by Stripe yet.',
   };
 }
 
-private async syncActualStripeFees(
-  paymentIntentId: string,
-) {
+private async getStripePaymentDetails(paymentIntentId: string) {
   const paymentIntent = await this.stripe.paymentIntents.retrieve(
     paymentIntentId,
     {
@@ -607,14 +753,36 @@ private async syncActualStripeFees(
     },
   );
 
-  const latestCharge = paymentIntent.latest_charge as Stripe.Charge;
+  const latestCharge =
+    paymentIntent.latest_charge as Stripe.Charge | null;
+
+  if (!latestCharge?.id) {
+    throw new Error(
+      `No Stripe charge found for PaymentIntent ${paymentIntentId}`,
+    );
+  }
 
   const balanceTransaction =
-    latestCharge.balance_transaction as Stripe.BalanceTransaction;
+    latestCharge.balance_transaction as
+      | Stripe.BalanceTransaction
+      | null;
+
+  if (!balanceTransaction) {
+    throw new Error(
+      `No balance transaction found for charge ${latestCharge.id}`,
+    );
+  }
 
   return {
+    stripeChargeId: latestCharge.id,
+
     stripeFeeAmount: balanceTransaction.fee,
+
     stripeNetAmount: balanceTransaction.net,
+
+    stripeFundsAvailableAt: balanceTransaction.available_on
+      ? new Date(balanceTransaction.available_on * 1000)
+      : null,
   };
 }
 

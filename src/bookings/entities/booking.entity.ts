@@ -164,6 +164,13 @@ export class Booking {
   @Column({ type: 'text', nullable: true })
   stripe_charge_id: string | null;
 
+  /**
+ * Date Stripe expects the charge funds to become available
+ * in the platform Stripe balance.
+ */
+@Column({ type: 'timestamptz', nullable: true })
+stripe_funds_available_at: Date | null;
+
   @Column({ type: 'timestamp', nullable: true })
   checkout_created_at: Date | null;
 
