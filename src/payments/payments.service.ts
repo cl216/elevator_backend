@@ -52,6 +52,14 @@ export class PaymentsService {
       return;
     }
 
+    if (event.type === 'charge.updated') {
+      await this.handleChargeUpdated(
+        event,
+        event.data.object as Stripe.Charge,
+      );
+      return;
+    }
+
     if (event.type === 'refund.updated') {
       await this.handleRefundUpdated(event, event.data.object as Stripe.Refund);
       return;
@@ -126,9 +134,15 @@ if (booking.status !== BookingStatus.PENDING) {
       );
 
       booking.stripe_charge_id = paymentDetails.stripeChargeId;
-      booking.stripe_fee_amount = paymentDetails.stripeFeeAmount;
-      booking.stripe_funds_available_at =
-        paymentDetails.stripeFundsAvailableAt;
+
+      if (paymentDetails.stripeFeeAmount !== null) {
+        booking.stripe_fee_amount = paymentDetails.stripeFeeAmount;
+      }
+
+      if (paymentDetails.stripeFundsAvailableAt) {
+        booking.stripe_funds_available_at =
+          paymentDetails.stripeFundsAvailableAt;
+      }
 
       await this.bookingRepo.save(booking);
 
@@ -174,15 +188,18 @@ if (confirmedBooking.stripe_payment_intent_id) {
       confirmedBooking.stripe_payment_intent_id,
     );
 
-    confirmedBooking.stripe_charge_id =
-      paymentDetails.stripeChargeId;
+confirmedBooking.stripe_charge_id =
+  paymentDetails.stripeChargeId;
 
-    confirmedBooking.stripe_fee_amount =
-      paymentDetails.stripeFeeAmount;
+if (paymentDetails.stripeFeeAmount !== null) {
+  confirmedBooking.stripe_fee_amount =
+    paymentDetails.stripeFeeAmount;
+}
 
-    confirmedBooking.stripe_funds_available_at =
-      paymentDetails.stripeFundsAvailableAt;
-
+if (paymentDetails.stripeFundsAvailableAt) {
+  confirmedBooking.stripe_funds_available_at =
+    paymentDetails.stripeFundsAvailableAt;
+} 
     await this.bookingRepo.save(confirmedBooking);
 
     this.logger.log(
@@ -266,6 +283,84 @@ body: `${learnerName} has paid for ${classTitle}. After the session, Elevator al
 
     this.logger.log(
       `STRIPE_WEBHOOK_BOOKING_CONFIRMED eventId=${event.id} bookingId=${confirmedBooking.id} checkoutSessionId=${checkoutSessionId}`,
+    );
+  }
+
+  private async handleChargeUpdated(
+    event: Stripe.Event,
+    chargeFromEvent: Stripe.Charge,
+  ) {
+    const charge = await this.stripe.charges.retrieve(chargeFromEvent.id, {
+      expand: ['balance_transaction'],
+    });
+
+    const paymentIntentId =
+      typeof charge.payment_intent === 'string'
+        ? charge.payment_intent
+        : charge.payment_intent?.id;
+
+    if (!paymentIntentId) {
+      this.logger.log(
+        `STRIPE_CHARGE_UPDATED_NO_PAYMENT_INTENT ` +
+          `eventId=${event.id} chargeId=${charge.id}`,
+      );
+      return;
+    }
+
+    const booking = await this.bookingRepo.findOne({
+      where: {
+        stripe_payment_intent_id: paymentIntentId,
+      },
+    });
+
+    if (!booking) {
+      this.logger.warn(
+        `STRIPE_CHARGE_UPDATED_BOOKING_NOT_FOUND ` +
+          `eventId=${event.id} ` +
+          `chargeId=${charge.id} ` +
+          `paymentIntentId=${paymentIntentId}`,
+      );
+      return;
+    }
+
+    booking.stripe_charge_id = charge.id;
+
+    const balanceTransaction =
+      charge.balance_transaction &&
+      typeof charge.balance_transaction !== 'string'
+        ? charge.balance_transaction
+        : null;
+
+    if (!balanceTransaction) {
+      await this.bookingRepo.save(booking);
+
+      this.logger.log(
+        `STRIPE_CHARGE_UPDATED_BALANCE_TRANSACTION_PENDING ` +
+          `eventId=${event.id} ` +
+          `bookingId=${booking.id} ` +
+          `chargeId=${charge.id}`,
+      );
+      return;
+    }
+
+    booking.stripe_fee_amount = balanceTransaction.fee;
+
+    if (balanceTransaction.available_on) {
+      booking.stripe_funds_available_at = new Date(
+        balanceTransaction.available_on * 1000,
+      );
+    }
+
+    await this.bookingRepo.save(booking);
+
+    this.logger.log(
+      `STRIPE_CHARGE_DETAILS_SAVED ` +
+        `eventId=${event.id} ` +
+        `bookingId=${booking.id} ` +
+        `chargeId=${charge.id} ` +
+        `fundsAvailableAt=${
+          booking.stripe_funds_available_at?.toISOString() ?? 'unknown'
+        }`,
     );
   }
 
@@ -620,9 +715,15 @@ async syncCheckoutStatus(bookingId: string, learnerId: string) {
         );
 
         booking.stripe_charge_id = paymentDetails.stripeChargeId;
-        booking.stripe_fee_amount = paymentDetails.stripeFeeAmount;
-        booking.stripe_funds_available_at =
-          paymentDetails.stripeFundsAvailableAt;
+
+        if (paymentDetails.stripeFeeAmount !== null) {
+          booking.stripe_fee_amount = paymentDetails.stripeFeeAmount;
+        }
+
+        if (paymentDetails.stripeFundsAvailableAt) {
+          booking.stripe_funds_available_at =
+            paymentDetails.stripeFundsAvailableAt;
+        }
 
         await this.bookingRepo.save(booking);
 
@@ -695,14 +796,18 @@ async syncCheckoutStatus(bookingId: string, learnerId: string) {
           confirmedBooking.stripe_payment_intent_id,
         );
 
-        confirmedBooking.stripe_charge_id =
-          paymentDetails.stripeChargeId;
+confirmedBooking.stripe_charge_id =
+  paymentDetails.stripeChargeId;
 
-        confirmedBooking.stripe_fee_amount =
-          paymentDetails.stripeFeeAmount;
+if (paymentDetails.stripeFeeAmount !== null) {
+  confirmedBooking.stripe_fee_amount =
+    paymentDetails.stripeFeeAmount;
+}
 
-        confirmedBooking.stripe_funds_available_at =
-          paymentDetails.stripeFundsAvailableAt;
+if (paymentDetails.stripeFundsAvailableAt) {
+  confirmedBooking.stripe_funds_available_at =
+    paymentDetails.stripeFundsAvailableAt;
+}
 
         await this.bookingRepo.save(confirmedBooking);
 
@@ -763,26 +868,24 @@ private async getStripePaymentDetails(paymentIntentId: string) {
   }
 
   const balanceTransaction =
-    latestCharge.balance_transaction as
-      | Stripe.BalanceTransaction
-      | null;
-
-  if (!balanceTransaction) {
-    throw new Error(
-      `No balance transaction found for charge ${latestCharge.id}`,
-    );
-  }
+    latestCharge.balance_transaction &&
+    typeof latestCharge.balance_transaction !== 'string'
+      ? latestCharge.balance_transaction
+      : null;
 
   return {
     stripeChargeId: latestCharge.id,
 
-    stripeFeeAmount: balanceTransaction.fee,
+    stripeFeeAmount:
+      balanceTransaction?.fee ?? null,
 
-    stripeNetAmount: balanceTransaction.net,
+    stripeNetAmount:
+      balanceTransaction?.net ?? null,
 
-    stripeFundsAvailableAt: balanceTransaction.available_on
-      ? new Date(balanceTransaction.available_on * 1000)
-      : null,
+    stripeFundsAvailableAt:
+      balanceTransaction?.available_on
+        ? new Date(balanceTransaction.available_on * 1000)
+        : null,
   };
 }
 
