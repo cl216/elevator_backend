@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { DataSource, QueryFailedError } from 'typeorm';
-import { Booking, BookingStatus } from './entities/booking.entity';
+import { Booking,PayoutStatus,  BookingStatus } from './entities/booking.entity';
 import { Session, SessionType } from '../sessions/entities/session.entity';
 import { Notification } from '../notifications/entities/notification.entity';
 import { containsBlockedContactOrOffPlatformContent } from '../utils/content-moderation';
@@ -123,6 +123,15 @@ function resetBookingForFreshCheckout(booking: Booking) {
   booking.status = BookingStatus.PENDING;
   booking.expires_at = new Date(Date.now() + 15 * 60 * 1000);
   booking.intro_message = introMessage?.trim() || null;
+
+  booking.stripe_charge_id = null;
+booking.stripe_funds_available_at = null;
+
+booking.payout_status = PayoutStatus.NOT_PAID_OUT;
+booking.paid_out_at = null;
+booking.stripe_transfer_id = null;
+booking.payout_attempted_at = null;
+booking.payout_failure_reason = null;
 
   booking.cancelled_at = null;
   booking.cancelled_by_user_id = null;
