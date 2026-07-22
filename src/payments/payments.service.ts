@@ -540,10 +540,34 @@ if (!Number.isFinite(lessonPriceEuros) || lessonPriceEuros <= 0) {
 
 const lessonAmount = Math.round(lessonPriceEuros * 100);
 
+// €3 Elevator platform fee
 const platformFeeAmount = 300;
 
+/*
+ * Estimated payment processing contribution.
+ *
+ * Uses Stripe's higher public European card pricing (2.5% + €0.25)
+ * and "grosses up" the fee because Stripe charges its percentage
+ * against the entire Checkout amount, including this fee itself.
+ *
+ * A small 5c buffer helps absorb fee variations between different
+ * card types and countries.
+ */
+const STRIPE_PERCENTAGE = 0.025;
+const STRIPE_FIXED_FEE = 25;
+const PROCESSING_BUFFER = 5;
+
+const subtotalAmount =
+  lessonAmount + platformFeeAmount;
+
 const estimatedStripeFeeAmount =
-  Math.round((lessonAmount + platformFeeAmount) * 0.015) + 25;
+  Math.ceil(
+    (
+      subtotalAmount * STRIPE_PERCENTAGE +
+      STRIPE_FIXED_FEE
+    ) /
+    (1 - STRIPE_PERCENTAGE)
+  ) + PROCESSING_BUFFER;
 
 const totalAmount =
   lessonAmount +
