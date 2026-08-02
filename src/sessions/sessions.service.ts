@@ -918,15 +918,16 @@ reviewStatus: REVIEW_STATUS.PENDING_REVIEW,
       .createQueryBuilder('booking')
       .leftJoin('booking.user', 'user')
       .select([
+        'user.id AS id',
         'user.first_name AS first_name',
+        'user.image_url AS image_url',
         'booking.createdAt AS created_at',
       ])
       .where('booking.session_id = :sessionId', { sessionId })
-      .andWhere('booking.status IN (:...statuses)', {
-        statuses: ['PENDING', 'CONFIRMED'],
+      .andWhere('booking.status = :confirmedStatus', {
+        confirmedStatus: 'CONFIRMED',
       })
-      .orderBy('booking.createdAt', 'ASC')
-      .limit(3);
+      .orderBy('booking.createdAt', 'ASC');
 
     if (
       sessionRow.session_type === SessionType.PRIVATE &&
@@ -939,9 +940,17 @@ reviewStatus: REVIEW_STATUS.PENDING_REVIEW,
 
     const attendeeRows = await attendeeRowsQuery.getRawMany();
 
-    const attendee_first_names = attendeeRows
-      .map((row) => (row.first_name ?? '').trim())
-      .filter(Boolean);
+    const attendees = attendeeRows
+      .map((row) => ({
+        id: String(row.id ?? ''),
+        first_name: String(row.first_name ?? '').trim(),
+        image_url: row.image_url ?? null,
+      }))
+      .filter((attendee) => attendee.id && attendee.first_name);
+
+    const attendee_first_names = attendees
+      .slice(0, 3)
+      .map((attendee) => attendee.first_name);
 
     const spotsLeft = Math.max(
       0,
@@ -962,8 +971,10 @@ reviewStatus: REVIEW_STATUS.PENDING_REVIEW,
       price: Number(sessionRow.price),
       max_participants: Number(sessionRow.max_participants),
       bookings_count: bookingsCount,
+      confirmed_attendees_count: attendees.length,
       spots_left: spotsLeft,
       attendee_first_names,
+      attendees,
       status: sessionRow.status,
       review_status: sessionRow.review_status,
       cancelled_at: sessionRow.cancelled_at ?? null,
@@ -1065,6 +1076,7 @@ arrival_instructions: null,
         'booking.createdAt AS created_at',
         'user.id AS learner_id',
         'user.first_name AS learner_first_name',
+        'user.image_url AS learner_image_url',
       ])
       .where('booking.session_id = :sessionId', { sessionId })
       .orderBy('booking.createdAt', 'DESC');
